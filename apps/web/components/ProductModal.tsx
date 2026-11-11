@@ -1,0 +1,173 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { Product, CartItem } from '@/app/types';
+
+interface ProductModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  product: Product | null;
+  onAddToCart: (item: CartItem) => void;
+}
+
+export default function ProductModal({ isOpen, onClose, product, onAddToCart }: ProductModalProps) {
+  const [size, setSize] = useState<'S' | 'M' | 'L'>('S');
+  const [hasTranChau, setHasTranChau] = useState(false);
+  const [hasKem, setHasKem] = useState(false);
+  const [note, setNote] = useState('');
+  const [quantity, setQuantity] = useState(1);
+
+  useEffect(() => {
+    if (product) {
+      setSize('S');
+      setHasTranChau(false);
+      setHasKem(false);
+      setNote('');
+      setQuantity(1);
+    }
+  }, [product]);
+
+  if (!isOpen || !product) return null;
+
+  // Logic giá mới: Size S là giá gốc, M +5k, L +10k
+  const getSizeAdjustment = () => {
+    if (size === 'M') return 5000;
+    if (size === 'L') return 10000;
+    return 0; // Size S
+  };
+
+  const toppingTotal = (hasTranChau ? 5000 : 0) + (hasKem ? 5000 : 0);
+  const unitPrice = product.basePrice + getSizeAdjustment() + toppingTotal;
+  const totalPrice = unitPrice * quantity;
+
+  const handleConfirm = () => {
+    onAddToCart({
+      product,
+      size,
+      hasTranChau,
+      hasKem,
+      note,
+      quantity,
+      totalPrice,
+    });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-3xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col md:flex-row relative">
+        <button 
+          onClick={onClose} 
+          className="absolute top-4 right-4 z-10 w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-200 transition"
+        >
+          ✕
+        </button>
+
+        <div className="md:w-1/2 h-64 md:h-auto relative bg-gray-50">
+          <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+        </div>
+
+        <div className="md:w-1/2 p-6 flex flex-col justify-between space-y-4 max-h-[85vh] overflow-y-auto">
+          <div>
+            <span className="text-xs font-semibold uppercase tracking-wider text-amber-700">PHÚC LONG SIGNATURE</span>
+            <h2 className="text-2xl font-bold text-gray-900 mt-1">{product.name}</h2>
+            <div className="text-[#006A32] font-bold text-xl mt-1">
+              {product.basePrice.toLocaleString('vi-VN')}₫
+            </div>
+            <p className="text-xs text-gray-500 mt-1">{product.description}</p>
+
+            {/* Chọn Size mới */}
+            <div className="mt-4">
+              <label className="block text-xs font-bold uppercase text-gray-600 mb-2">
+                Chọn kích cỡ <span className="text-amber-600 font-normal">BẮT BUỘC</span>
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { key: 'S', label: 'S', desc: 'Giá gốc' },
+                  { key: 'M', label: 'M', desc: '+5.000đ' },
+                  { key: 'L', label: 'L', desc: '+10.000đ' },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => setSize(item.key as 'S' | 'M' | 'L')}
+                    className={`p-3 rounded-xl border text-center transition ${
+                      size === item.key 
+                        ? 'border-[#006A32] bg-[#006A32]/5 text-[#006A32] font-bold' 
+                        : 'border-gray-200 hover:border-gray-300 text-gray-700'
+                    }`}
+                  >
+                    <div className="text-sm font-semibold">{item.label}</div>
+                    <div className="text-[10px] text-gray-400 mt-0.5">{item.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Topping */}
+            <div className="mt-4">
+              <label className="block text-xs font-bold uppercase text-gray-600 mb-2">
+                Topping <span className="text-gray-400 font-normal">Có thể chọn nhiều</span>
+              </label>
+              <div className="space-y-2">
+                <label className="flex items-center justify-between p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50">
+                  <div className="flex items-center space-x-3">
+                    <input 
+                      type="checkbox" 
+                      checked={hasTranChau} 
+                      onChange={(e) => setHasTranChau(e.target.checked)}
+                      className="w-4 h-4 text-[#006A32] rounded focus:ring-[#006A32]"
+                    />
+                    <span className="text-sm font-medium text-gray-800">Trân châu</span>
+                  </div>
+                  <span className="text-xs text-gray-500">+5.000đ</span>
+                </label>
+
+                <label className="flex items-center justify-between p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50">
+                  <div className="flex items-center space-x-3">
+                    <input 
+                      type="checkbox" 
+                      checked={hasKem} 
+                      onChange={(e) => setHasKem(e.target.checked)}
+                      className="w-4 h-4 text-[#006A32] rounded focus:ring-[#006A32]"
+                    />
+                    <span className="text-sm font-medium text-gray-800">Kem</span>
+                  </div>
+                  <span className="text-xs text-gray-500">+5.000đ</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Ghi chú */}
+            <div className="mt-4">
+              <label className="block text-xs font-bold uppercase text-gray-600 mb-2">Ghi chú cho cửa hàng</label>
+              <input 
+                type="text" 
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Ví dụ: ít ngọt, không dùng ống hút..." 
+                className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-[#006A32]"
+              />
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-gray-100 flex items-center space-x-4">
+            <div className="flex items-center border border-gray-200 rounded-xl px-3 py-2 space-x-3">
+              <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="text-gray-500 font-bold hover:text-black">-</button>
+              <span className="font-bold text-sm w-4 text-center">{quantity}</span>
+              <button onClick={() => setQuantity(quantity + 1)} className="text-gray-500 font-bold hover:text-black">+</button>
+            </div>
+
+            <button 
+              onClick={handleConfirm}
+              className="flex-1 bg-[#006A32] text-white py-3 px-6 rounded-xl font-bold flex justify-between items-center hover:bg-[#005227] transition shadow-lg shadow-[#006A32]/20"
+            >
+              <span>Thêm vào giỏ</span>
+              <span>{totalPrice.toLocaleString('vi-VN')}₫</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
