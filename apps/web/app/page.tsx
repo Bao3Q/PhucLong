@@ -5,45 +5,45 @@ import { useRouter } from 'next/navigation';
 import ProductModal from '@/components/ProductModal';
 import { Product, CartItem } from '@/app/types';
 
-const menuProducts: Product[] = [
-  { 
-    id: 1, 
-    name: 'Trà Sữa Phúc Long', 
-    basePrice: 45000, 
-    description: 'Trà đậm vị truyền thống kết hợp sữa thơm béo đặc trưng', 
-    image: 'https://images.unsplash.com/photo-1558857563-b371033873b8?w=500&auto=format&fit=crop&q=60', 
-    tag: 'BÁN CHẠY' 
-  },
-  { 
-    id: 2, 
-    name: 'Trà Đào Trầm Hương', 
-    basePrice: 55000, 
-    description: 'Đào miếng tươi giòn, nền trà ô long thanh mát ngọt dịu', 
-    image: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=500&auto=format&fit=crop&q=60', 
-    tag: 'MỚI' 
-  },
-  { 
-    id: 3, 
-    name: 'Cà Phê Sữa Đá', 
-    basePrice: 35000, 
-    description: 'Hạt Robusta đậm đà hòa quyện cùng sữa đặc truyền thống', 
-    image: 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?w=500&auto=format&fit=crop&q=60', 
-    tag: null 
-  },
-  { 
-    id: 4, 
-    name: 'Cappuccino Espresso', 
-    basePrice: 45000, 
-    description: 'Espresso rang đậm phủ lớp bọt sữa nóng mịn mượt', 
-    image: 'https://images.unsplash.com/photo-1572442388796-11668a67e53d?w=500&auto=format&fit=crop&q=60', 
-    tag: null 
-  },
-];
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+
+const categories = ['Tất cả', 'Trà Sữa', 'Trà Trái Cây', 'Cà Phê'];
 
 export default function Home() {
   const router = useRouter();
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [activeCategory, setActiveCategory] = useState<string>('Tất cả');
+
+
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchProducts = async (cat: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const url = cat === 'Tất cả'
+        ? `${API_BASE_URL}/products`
+        : `${API_BASE_URL}/products?category=${encodeURIComponent(cat)}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`Lỗi kết nối máy chủ (${res.status})`);
+      }
+      const data = await res.json();
+      setProducts(data);
+    } catch (err: any) {
+      console.error('Fetch products error:', err);
+      setError(err.message || 'Không thể tải danh sách món. Vui lòng thử lại sau.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProducts(activeCategory);
+  }, [activeCategory]);
 
   useEffect(() => {
     const savedCart = localStorage.getItem('phuclong_cart');
@@ -64,14 +64,14 @@ export default function Home() {
   };
 
   // Nếu giỏ rỗng thì tổng tiền luôn hiển thị 0đ
-  const totalCartPrice = cart.length === 0 
-    ? 0 
+  const totalCartPrice = cart.length === 0
+    ? 0
     : cart.reduce((sum, item) => sum + item.totalPrice, 0);
 
   return (
     /* Nền Gradient Kem Ấm Sang Trọng */
     <div className="min-h-screen bg-gradient-to-br from-[#FDFBF7] via-[#F8F4EC] to-[#F2EFEA] text-stone-800 font-sans antialiased relative">
-      
+
       {/* Top Header */}
       <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-stone-200/60 px-6 lg:px-12 py-3.5 flex justify-between items-center shadow-sm">
         <div className="flex items-center space-x-8">
@@ -86,10 +86,10 @@ export default function Home() {
           </div>
 
           <div className="relative hidden md:block w-72 lg:w-96">
-            <input 
-              type="text" 
-              placeholder="Tìm món nước yêu thích..." 
-              className="w-full bg-stone-100/80 border border-stone-200/80 rounded-full py-2 pl-4 pr-10 text-xs text-stone-700 placeholder-stone-400 focus:outline-none focus:bg-white focus:border-[#006A32] focus:ring-2 focus:ring-[#006A32]/10 transition-all" 
+            <input
+              type="text"
+              placeholder="Tìm món nước yêu thích..."
+              className="w-full bg-stone-100/80 border border-stone-200/80 rounded-full py-2 pl-4 pr-10 text-xs text-stone-700 placeholder-stone-400 focus:outline-none focus:bg-white focus:border-[#006A32] focus:ring-2 focus:ring-[#006A32]/10 transition-all"
             />
             <span className="absolute right-3.5 top-2.5 text-stone-400 text-xs">🔍</span>
           </div>
@@ -98,9 +98,9 @@ export default function Home() {
         <div className="flex items-center space-x-6 text-xs font-semibold text-stone-600">
           <span className="text-[#006A32] font-bold border-b-2 border-[#006A32] pb-0.5 cursor-pointer">Menu Đồ Uống</span>
           <span className="cursor-pointer hover:text-stone-900 transition">Lịch sử đơn</span>
-          
-          <button 
-            onClick={() => router.push('/checkout')} 
+
+          <button
+            onClick={() => router.push('/checkout')}
             className="bg-[#006A32] hover:bg-[#005227] text-white px-5 py-2.5 rounded-full font-bold flex items-center space-x-3 shadow-lg shadow-[#006A32]/25 hover:shadow-xl hover:shadow-[#006A32]/30 active:scale-95 transition-all duration-200"
           >
             <span className="flex items-center space-x-1.5">
@@ -118,16 +118,25 @@ export default function Home() {
 
       {/* Main Layout */}
       <div className="max-w-7xl mx-auto px-6 lg:px-8 py-8 grid grid-cols-1 md:grid-cols-4 gap-8">
-        {/* Sidebar Left */}
+        {/* Sidebar Left: Category filters */}
         <aside className="md:col-span-1 space-y-4">
           <div className="bg-white/90 backdrop-blur-sm rounded-3xl p-5 border border-stone-200/80 shadow-sm space-y-3">
             <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400 block">Khám phá menu</span>
             <h2 className="text-lg font-extrabold text-stone-900">Danh mục</h2>
             <div className="space-y-1.5">
-              <button className="w-full text-left px-4 py-3 rounded-2xl bg-[#006A32] text-white font-bold text-xs shadow-md shadow-[#006A32]/15 flex justify-between items-center">
-                <span>Đồ uống</span>
-                <span className="text-emerald-200 text-sm">›</span>
-              </button>
+              {categories.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setActiveCategory(cat)}
+                  className={`w-full text-left px-4 py-3 rounded-2xl font-bold text-xs flex justify-between items-center transition-all ${activeCategory === cat
+                    ? 'bg-[#006A32] text-white shadow-md shadow-[#006A32]/15'
+                    : 'bg-stone-50 text-stone-600 hover:bg-stone-100'
+                    }`}
+                >
+                  <span>{cat}</span>
+                  <span className={activeCategory === cat ? 'text-emerald-200 text-sm' : 'text-stone-400'}>›</span>
+                </button>
+              ))}
             </div>
           </div>
         </aside>
@@ -152,63 +161,103 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Product Grid */}
+          {/* Product Grid Header */}
           <div className="space-y-5">
             <div className="flex justify-between items-end border-b border-stone-200/80 pb-3">
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400 block">Thưởng thức ngay</span>
-                <h2 className="text-xl font-extrabold text-stone-900">Hương vị đặc trưng</h2>
+                <h2 className="text-xl font-extrabold text-stone-900">{activeCategory}</h2>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-              {menuProducts.map((item) => (
-                <div 
-                  key={item.id} 
-                  onClick={() => setSelectedProduct(item)}
-                  className="bg-white/90 backdrop-blur-sm rounded-3xl p-3.5 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border border-stone-200/80 cursor-pointer flex flex-col justify-between group"
+
+            {loading && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="bg-white/70 rounded-3xl p-4 border border-stone-200 animate-pulse space-y-3">
+                    <div className="h-44 bg-stone-200 rounded-2xl w-full"></div>
+                    <div className="h-4 bg-stone-200 rounded w-3/4"></div>
+                    <div className="h-3 bg-stone-200 rounded w-1/2"></div>
+                    <div className="h-6 bg-stone-200 rounded w-1/3 pt-2"></div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+
+            {!loading && error && (
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center space-y-3 my-6">
+                <div className="text-3xl">⚠️</div>
+                <h3 className="font-bold text-red-800 text-sm">Không thể kết nối máy chủ API</h3>
+                <p className="text-xs text-red-600 max-w-md mx-auto">{error}</p>
+                <button
+                  onClick={() => fetchProducts(activeCategory)}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl shadow-md transition"
                 >
-                  <div>
-                    <div className="relative h-44 w-full rounded-2xl overflow-hidden bg-stone-100">
-                      <img 
-                        src={item.image} 
-                        alt={item.name} 
-                        className="w-full h-full object-cover transition duration-500" 
-                      />
-                      {item.tag && (
-                        <span className={`absolute top-2.5 left-2.5 px-2.5 py-1 text-[9px] font-black text-white rounded-lg shadow-sm ${
-                          item.tag === 'BÁN CHẠY' ? 'bg-amber-600' : 'bg-blue-600'
-                        }`}>
-                          {item.tag}
-                        </span>
-                      )}
-                    </div>
+                  Thử lại
+                </button>
+              </div>
+            )}
 
-                    <div className="mt-3.5 space-y-1">
-                      <h4 className="font-bold text-sm text-stone-900 group-hover:text-[#006A32] transition-colors">{item.name}</h4>
-                      <p className="text-[11px] text-stone-400 line-clamp-2 leading-relaxed">{item.description}</p>
-                    </div>
-                  </div>
+            {/* TRẠNG THÁI 3: EMPTY */}
+            {!loading && !error && products.length === 0 && (
+              <div className="bg-white/80 rounded-3xl p-12 text-center border border-stone-200/80 space-y-3 my-6">
+                <div className="text-4xl">🍵</div>
+                <h3 className="font-bold text-stone-800 text-base">Hiện chưa có món nào trong danh mục này</h3>
+                <p className="text-xs text-stone-500">Vui lòng quay lại danh mục khác hoặc thử lại sau.</p>
+              </div>
+            )}
 
-                  <div className="pt-3 mt-2 border-t border-stone-100 flex justify-between items-center">
+            {/* DANH SÁCH MÓN KHI CÓ DỮ LIỆU */}
+            {!loading && !error && products.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                {products.map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => setSelectedProduct(item)}
+                    className="bg-white/90 backdrop-blur-sm rounded-3xl p-3.5 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border border-stone-200/80 cursor-pointer flex flex-col justify-between group"
+                  >
                     <div>
-                      <span className="text-[10px] text-stone-400 block">Giá từ</span>
-                      <span className="font-black text-[#006A32] text-base">{item.basePrice.toLocaleString('vi-VN')}₫</span>
+                      <div className="relative h-44 w-full rounded-2xl overflow-hidden bg-stone-100">
+                        <img
+                          src={item.image}
+                          alt={item.name}
+                          className="w-full h-full object-cover transition duration-500 group-hover:scale-105"
+                        />
+                        {item.tag && (
+                          <span className={`absolute top-2.5 left-2.5 px-2.5 py-1 text-[9px] font-black text-white rounded-lg shadow-sm ${item.tag === 'BÁN CHẠY' ? 'bg-amber-600' : 'bg-blue-600'
+                            }`}>
+                            {item.tag}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="mt-3.5 space-y-1">
+                        <h4 className="font-bold text-sm text-stone-900 group-hover:text-[#006A32] transition-colors">{item.name}</h4>
+                        <p className="text-[11px] text-stone-400 line-clamp-2 leading-relaxed">{item.description}</p>
+                      </div>
                     </div>
-                    <button className="w-8 h-8 rounded-full bg-[#006A32]/10 text-[#006A32] font-bold flex items-center justify-center group-hover:bg-[#006A32] group-hover:text-white transition-colors">
-                      +
-                    </button>
+
+                    <div className="pt-3 mt-2 border-t border-stone-100 flex justify-between items-center">
+                      <div>
+                        <span className="text-[10px] text-stone-400 block">Giá từ</span>
+                        <span className="font-black text-[#006A32] text-base">{item.basePrice.toLocaleString('vi-VN')}₫</span>
+                      </div>
+                      <button className="w-8 h-8 rounded-full bg-[#006A32]/10 text-[#006A32] font-bold flex items-center justify-center group-hover:bg-[#006A32] group-hover:text-white transition-colors">
+                        +
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </main>
       </div>
 
-      <ProductModal 
-        isOpen={!!selectedProduct} 
-        onClose={() => setSelectedProduct(null)} 
+      <ProductModal
+        isOpen={!!selectedProduct}
+        onClose={() => setSelectedProduct(null)}
         product={selectedProduct}
         onAddToCart={handleAddToCart}
       />
