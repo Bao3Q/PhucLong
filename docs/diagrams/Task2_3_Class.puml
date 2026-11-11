@@ -1,0 +1,137 @@
+@startuml
+skinparam backgroundColor white
+skinparam monochrome true
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam defaultFontName DejaVu Sans
+skinparam defaultFontSize 15
+skinparam classAttributeIconSize 0
+skinparam classBackgroundColor white
+skinparam classBorderColor black
+skinparam ArrowColor black
+skinparam nodesep 70
+skinparam ranksep 70
+skinparam dpi 180
+hide circle
+
+title BREWLITE - CLASS DIAGRAM\nTask 2.3 | Mô hình domain theo ký hiệu UML trong Chương 5
+
+class User {
+ - id : UUID
+ - fullName : String
+ - email : String
+ - passwordHash : String
+ - role : UserRole
+ + updateProfile(name : String) : void
+ + hasRole(role : UserRole) : Boolean
+}
+class Order {
+ - id : UUID
+ - checkoutKey : String
+ - createdAt : DateTime
+ - status : OrderStatus
+ - subtotal : Decimal
+ - discountAmount : Decimal
+ - totalAmount : Decimal
+ + calculateTotal() : Decimal
+ + applyPromotion(p : Promotion) : void
+ + confirmPayment() : void
+ + changeStatus(next : OrderStatus) : void
+ + cancel() : void
+}
+class OrderItem {
+ - id : UUID
+ - productNameSnapshot : String
+ - sizeSnapshot : String
+ - toppingsSnapshot : List<String>
+ - unitPriceSnapshot : Decimal
+ - quantity : Integer
+ + calculateSubtotal() : Decimal
+}
+class Product {
+ - id : UUID
+ - name : String
+ - basePrice : Decimal
+ - availableStock : Integer
+ - isActive : Boolean
+ + isAvailable(quantity : Integer) : Boolean
+ + reserveStock(quantity : Integer) : void
+ + releaseStock(quantity : Integer) : void
+}
+class Payment {
+ - id : UUID
+ - idempotencyKey : String
+ - requestHash : String
+ - amount : Decimal
+ - method : PaymentMethod
+ - status : PaymentStatus
+ - providerRef : String [0..1]
+ + markSucceeded(reference : String) : void
+ + markFailed() : void
+ + isFinal() : Boolean
+}
+class Promotion {
+ - id : UUID
+ - code : String
+ - discountRate : Decimal
+ - startsAt : DateTime
+ - endsAt : DateTime
+ - isActive : Boolean
+ + isValid(at : DateTime) : Boolean
+ + calculateDiscount(subtotal : Decimal) : Decimal
+}
+class LoyaltyTransaction {
+ - id : UUID
+ - pointsDelta : Integer
+ - reason : String
+ - createdAt : DateTime
+ + isEarn() : Boolean
+ + isRedeem() : Boolean
+}
+
+User "1" -right- "0..*" Order : đặt
+Order "1" *-right- "1..*" OrderItem : gồm
+OrderItem "0..*" -down- "1" Product : tham chiếu
+Order "1" -down- "0..1" Payment : thanh toán
+Promotion "0..1" -up- "0..*" Order : áp dụng cho
+User "1" -down- "0..*" LoyaltyTransaction : sở hữu
+LoyaltyTransaction "0..*" -- "0..1" Order : phát sinh từ
+
+Promotion -[hidden]right- Payment
+Payment -[hidden]right- Product
+LoyaltyTransaction -[hidden]right- Promotion
+
+together {
+ enum UserRole <<enumeration>> {
+  CUSTOMER
+  STAFF
+  MANAGER
+ }
+ enum OrderStatus <<enumeration>> {
+  PENDING_PAYMENT
+  CONFIRMED
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+ }
+ enum PaymentStatus <<enumeration>> {
+  PENDING
+  SUCCEEDED
+  FAILED
+ }
+ enum PaymentMethod <<enumeration>> {
+  WALLET
+  CARD
+ }
+}
+LoyaltyTransaction -[hidden]down- UserRole
+Promotion -[hidden]down- OrderStatus
+Payment -[hidden]down- PaymentStatus
+Product -[hidden]down- PaymentMethod
+UserRole -[hidden]right- OrderStatus
+OrderStatus -[hidden]right- PaymentStatus
+PaymentStatus -[hidden]right- PaymentMethod
+
+
+@enduml
