@@ -356,28 +356,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS "LoyaltyTransaction_orderId_earn_key"
 
 CREATE TABLE IF NOT EXISTS "Ingredient" (
     "id"        SERIAL        NOT NULL,
-    "productId" TEXT          NOT NULL,
-    "size"      "ProductSize" NOT NULL DEFAULT 'M',
-    "cupQuantity" INTEGER     NOT NULL DEFAULT 0,
-    "sugar"     NUMERIC(10,2) NOT NULL DEFAULT 0,
-    "milk"      NUMERIC(10,2) NOT NULL DEFAULT 0,
-    "coffee"    NUMERIC(10,2) NOT NULL DEFAULT 0,
+    "name"      TEXT          NOT NULL,
+    "quantity"  NUMERIC(10,2) NOT NULL DEFAULT 0,
+    "unit"      TEXT          NOT NULL,
     "createdAt" TIMESTAMP(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Ingredient_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "Ingredient_productId_size_key" UNIQUE ("productId", "size"),
-    CONSTRAINT "Ingredient_cupQuantity_check" CHECK ("cupQuantity" >= 0),
-    CONSTRAINT "Ingredient_sugar_check" CHECK ("sugar" >= 0),
-    CONSTRAINT "Ingredient_milk_check" CHECK ("milk" >= 0),
-    CONSTRAINT "Ingredient_coffee_check" CHECK ("coffee" >= 0),
-    CONSTRAINT "Ingredient_productId_fkey"
-        FOREIGN KEY ("productId") REFERENCES "Product" ("id")
-        ON DELETE CASCADE ON UPDATE CASCADE
+    CONSTRAINT "Ingredient_quantity_check" CHECK ("quantity" >= 0)
 );
 
-CREATE INDEX IF NOT EXISTS "Ingredient_productId_idx"
-    ON "Ingredient" ("productId");
+COMMENT ON TABLE "Ingredient" IS
+    'Danh sách nguyên liệu và số lượng tồn kho.';
+COMMENT ON COLUMN "Ingredient"."quantity" IS
+    'Số lượng nguyên liệu hiện có, tính theo unit.';
 
 CREATE OR REPLACE FUNCTION "set_updated_at"()
 RETURNS TRIGGER AS $$
