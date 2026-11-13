@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "dev": "concurrently -n \"API,WEB\" -c \"blue,green\" \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:docker": "concurrently -n \"API,WEB\" -c \"blue,green\" \"PORT=4000 npm run dev:api\" \"PORT=3000 npm run dev:web\"",
     "dev:api": "npm --prefix apps/api run start:dev",
     "dev:web": "npm --prefix apps/web run dev",
     "build": "concurrently \"npm --prefix apps/api run build\" \"npm --prefix apps/web run build\"",

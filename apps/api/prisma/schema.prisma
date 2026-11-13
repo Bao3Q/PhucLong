@@ -87,6 +87,8 @@ model Promotion {
   updatedAt         DateTime     @default(now()) @updatedAt
 
   orders            Order[]
+
+  @@index([isActive, startsAt, endsAt], map: "Promotion_active_dates_idx")
 }
 
 model Order {
