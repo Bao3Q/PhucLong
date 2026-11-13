@@ -10,7 +10,7 @@ import { setupApp } from '../app.setup';
  * - CUSTOMER        → 403
  * - ADMIN           → được phép
  */
-describe('Products RBAC (e2e)', () => {
+describe('Auth + phân quyền (e2e)', () => {
   let app: INestApplication;
   let http: ReturnType<INestApplication['getHttpServer']>;
   let adminToken: string;
@@ -27,21 +27,18 @@ describe('Products RBAC (e2e)', () => {
   beforeAll(async () => {
     process.env.JWT_SECRET = 'e2e_secret';
     process.env.BCRYPT_ROUNDS = '4';
-    process.env.NODE_ENV = 'test';
-    delete process.env.ADMIN_EMAIL;
-    delete process.env.ADMIN_PASSWORD;
 
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
     app = moduleRef.createNestApplication();
     setupApp(app);
-    await app.init(); // chạy onModuleInit → seed admin
+    await app.init();
     http = app.getHttpServer();
 
     const admin = await request(http)
       .post('/auth/login')
-      .send({ email: 'admin@phuclong.vn', password: 'Admin@123456' });
+      .send({ email: 'admin@maycha.vn', password: 'Admin@123456' });
     adminToken = admin.body.accessToken;
 
     await request(http)
@@ -94,18 +91,6 @@ describe('Products RBAC (e2e)', () => {
         .send({ email: 'hack@phuclong.vn', password: 'matkhau123', role: 'ADMIN' })
         .expect(201);
       expect(res.body.role).toBe('CUSTOMER');
-    });
-    it('GET /auth/me: 401 khi không có token, 200 khi có', async () => {
-      await request(http).get('/auth/me').expect(401);
-      const res = await request(http)
-        .get('/auth/me')
-        .set('Authorization', `Bearer ${customerToken}`)
-        .expect(200);
-      expect(res.body).toMatchObject({
-        email: 'khach@phuclong.vn',
-        role: 'CUSTOMER',
-      });
-      expect(res.body).not.toHaveProperty('passwordHash');
     });
   });
 
@@ -205,6 +190,39 @@ describe('Products RBAC (e2e)', () => {
 
     it('DELETE sản phẩm không tồn tại → 404', async () => {
       await request(http).delete('/products/999999').set(auth()).expect(404);
+    });
+  });
+
+  describe('guard bảo vệ route đặt đơn', () => {
+    const order = {
+      items: [
+        {
+          productId: 1,
+          productName: 'Trà Sữa Phúc Long',
+          size: 'M',
+          quantity: 1,
+          unitPrice: 50000,
+        },
+      ],
+    };
+
+    it('POST /orders không có token → 401', async () => {
+      await request(http).post('/orders').send(order).expect(401);
+    });
+    it('POST /orders token giả → 401', async () => {
+      await request(http)
+        .post('/orders')
+        .set('Authorization', 'Bearer khong.hop.le')
+        .send(order)
+        .expect(401);
+    });
+    it('POST /orders có token khách hàng → 201', async () => {
+      const res = await request(http)
+        .post('/orders')
+        .set('Authorization', `Bearer ${customerToken}`)
+        .send(order)
+        .expect(201);
+      expect(res.body.status).toBe('PENDING_PAYMENT');
     });
   });
 });

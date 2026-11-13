@@ -3,16 +3,40 @@ import { Injectable } from '@nestjs/common';
 import { User, UserRole } from './entities/user.entity';
 
 /**
- * Kho lưu user trong bộ nhớ (cùng kiểu với ProductsService hiện tại).
- * Khi chuyển sang PostgreSQL chỉ cần thay phần cài đặt bên trong,
- * giữ nguyên các phương thức create / findByEmail / findById.
+ * Kho user lưu trong bộ nhớ (Phúc Long chưa nối database, giống ProductsService).
+ * Khi có PostgreSQL chỉ cần thay phần bên trong, giữ nguyên create / findByEmail / findById.
+ *
+ * Tài khoản ADMIN mặc định lấy từ prisma/schema.sql của nhóm:
+ *   email    : admin@maycha.vn
+ *   mật khẩu : Admin@123456
  */
+const DEFAULT_ADMIN = {
+  id: '00000000-0000-4000-8000-000000000001',
+  email: 'admin@maycha.vn',
+  passwordHash:
+    '$2b$10$6QjZRCXeZIk1rYpQaxbQfOZK4p.6T.DVVbWFXSFikJEgA.nMLrP56',
+};
+
 @Injectable()
 export class UsersRepository {
   private readonly users = new Map<string, User>();
   private readonly emailIndex = new Map<string, string>();
 
-  /** Trả về undefined nếu email đã tồn tại (không phân biệt hoa/thường). */
+  constructor() {
+    this.seedAdmin();
+  }
+
+  private seedAdmin(): void {
+    const admin: User = {
+      ...DEFAULT_ADMIN,
+      role: 'ADMIN',
+      loyaltyPoints: 0,
+      createdAt: new Date(),
+    };
+    this.users.set(admin.id, admin);
+    this.emailIndex.set(admin.email, admin.id);
+  }
+
   async create(
     email: string,
     passwordHash: string,
@@ -45,9 +69,10 @@ export class UsersRepository {
     return user ? { ...user } : undefined;
   }
 
-  /** Dùng trong test. */
+  /** Dùng trong test: xóa hết rồi tạo lại admin mặc định. */
   clear(): void {
     this.users.clear();
     this.emailIndex.clear();
+    this.seedAdmin();
   }
 }
