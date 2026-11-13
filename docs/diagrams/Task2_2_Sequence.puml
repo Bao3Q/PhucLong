@@ -1,0 +1,137 @@
+@startuml
+skinparam backgroundColor white
+skinparam monochrome true
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam defaultFontName DejaVu Sans
+skinparam defaultFontSize 14
+skinparam ArrowColor black
+skinparam dpi 160
+hide empty description
+
+title Task 2.2 - Sequence: Checkout và thanh toán idempotent
+hide footbox
+skinparam sequenceLifeLineBorderColor black
+skinparam sequenceLifeLineBackgroundColor white
+skinparam sequenceParticipantBackgroundColor white
+skinparam sequenceArrowThickness 1.2
+autonumber
+actor Customer as C
+participant "ui : Next.js UI" as UI
+participant "api : NestJS API" as API
+participant "db : PostgreSQL" as DB
+participant "payment : Payment Service" as PS
+C -> UI : Chọn Đặt hàng
+activate UI
+UI -> API : POST /orders (JWT, cart, checkoutKey)
+activate API
+API -> API : Kiểm tra JWT; validate DTO
+activate API
+API --> API : Kết quả kiểm tra
+deactivate API
+alt JWT / dữ liệu không hợp lệ
+ API --> UI : 401 / 400
+ UI --> C : Yêu cầu đăng nhập / sửa dữ liệu
+else Yêu cầu hợp lệ
+ group Transaction tạo đơn
+  API -> DB : BEGIN; bảo vệ UNIQUE(userId, checkoutKey);\ntra checkoutKey;\nkhóa sản phẩm SELECT FOR UPDATE
+activate DB
+  DB --> API : Đơn đã có hoặc giá / tồn kho hiện tại
+deactivate DB
+  alt checkoutKey cũ nhưng khác payload
+   API -> DB : ROLLBACK
+activate DB
+DB --> API : Kết quả thực thi
+deactivate DB
+   API --> UI : 409 Checkout conflict
+  else checkoutKey đã tồn tại, cùng payload
+   API -> DB : COMMIT (không trừ kho lại)
+activate DB
+   DB --> API : Order đã tạo
+deactivate DB
+  else Hết hàng / giá thay đổi
+   API -> DB : ROLLBACK
+activate DB
+DB --> API : Kết quả thực thi
+deactivate DB
+   API --> UI : 409; thông tin cần cập nhật
+   UI --> C : Sửa giỏ / xác nhận giá mới
+  else Đủ hàng, giá được xác nhận
+   API -> DB : INSERT Order + OrderItem;\nUPDATE tồn khả dụng = tồn - số lượng; COMMIT
+activate DB
+   DB --> API : orderId, PENDING_PAYMENT
+deactivate DB
+  end
+ end
+ opt Đã có orderId hợp lệ
+  API --> UI : 200 / 201 {orderId, total, status}
+  UI -> API : POST /payments (JWT, orderId, method)\nIdempotency-Key: K
+  API -> API : Kiểm tra JWT, chủ đơn, trạng thái;\nvalidate; tính amount từ Order
+activate API
+API --> API : Kết quả kiểm tra
+deactivate API
+  break JWT / DTO / quyền sở hữu / trạng thái không hợp lệ
+   API --> UI : 400 / 401 / 403 / 409
+   UI --> C : Hiển thị lỗi phù hợp
+  end
+  API -> DB : Atomic INSERT Payment(PENDING, K, requestHash)\nUNIQUE(userId, K), UNIQUE(orderId); hoặc đọc bản ghi có sẵn
+activate DB
+  DB --> API : Payment mới / hiện có
+deactivate DB
+  alt Key cũ nhưng khác payload
+   API --> UI : 409 Idempotency conflict
+  else Key cũ, cùng payload
+   API --> UI : 200 kết quả đã lưu / 202 PENDING\n(không tạo Payment mới)
+  else Đơn đã có Payment với key khác
+   API --> UI : 409; tra cứu Payment hiện có của đơn
+  else Payment mới
+   API -> PS : Charge(paymentId, amount, method, K)
+activate PS
+   note over API,PS
+    Ngoài DB transaction; mock cũng deduplicate theo K.
+    Timeout không được xem là thanh toán thất bại.
+   end note
+   alt Kết quả cuối: thành công
+    PS --> API : SUCCEEDED, providerRef
+    API -> DB : BEGIN; khóa Payment/Order;\nPENDING -> SUCCEEDED; Order -> CONFIRMED; COMMIT
+activate DB
+DB --> API : Kết quả thực thi
+deactivate DB
+    API --> UI : 200 SUCCEEDED
+   else Kết quả cuối: thất bại
+    PS --> API : FAILED, reason
+    API -> DB : BEGIN; khóa Payment/Order;\nPENDING -> FAILED; Order -> CANCELLED;\nhoàn tồn kho đúng một lần; COMMIT
+activate DB
+DB --> API : Kết quả thực thi
+deactivate DB
+    API --> UI : 200 FAILED, reason
+   else Timeout / chưa có kết quả
+    PS --> API : PENDING / timeout
+    API --> UI : 202 PENDING
+    loop Đối soát đến trạng thái cuối
+     API -> PS : GET status(K) / retry cùng K
+     PS --> API : PENDING / SUCCEEDED / FAILED
+    end
+    API -> DB : Transaction áp dụng kết quả cuối\nnhư hai nhánh trên (chỉ khi còn PENDING)
+activate DB
+DB --> API : Kết quả thực thi
+deactivate DB
+   end
+deactivate PS
+  end
+  loop UI tra cứu nếu PENDING
+   UI -> API : GET /orders/:id (JWT)
+   API -> DB : SELECT đơn + payment; kiểm tra chủ đơn
+activate DB
+   DB --> API : Trạng thái hiện tại
+deactivate DB
+   API --> UI : Order + payment status
+  end
+  UI --> C : Xác nhận / thất bại / đang xử lý
+ end
+end
+deactivate API
+deactivate UI
+
+
+@enduml

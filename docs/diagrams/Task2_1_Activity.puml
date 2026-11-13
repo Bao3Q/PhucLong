@@ -1,0 +1,81 @@
+@startuml
+skinparam backgroundColor white
+skinparam monochrome true
+skinparam shadowing false
+skinparam roundCorner 20
+skinparam conditionStyle insideDiamond
+skinparam activityDiamondFontSize 13
+skinparam activityBackgroundColor white
+skinparam activityBorderColor black
+skinparam activityDiamondBackgroundColor white
+skinparam activityDiamondBorderColor black
+skinparam defaultFontName DejaVu Sans
+skinparam defaultFontSize 14
+skinparam ArrowColor black
+skinparam ArrowFontSize 11
+skinparam dpi 160
+hide empty description
+
+title Task 2.1 - Activity: Menu đến theo dõi đơn
+|Khách hàng|
+start
+:Mở ứng dụng và yêu cầu xem menu;
+|BrewLite|
+:Tải và hiển thị menu, giá, tình trạng hàng;
+|Khách hàng|
+:Xem chi tiết, chọn size/topping;
+:Thêm / sửa giỏ hàng, chọn Đặt hàng;
+|BrewLite|
+if (\n     Phiên đăng nhập     \n     hợp lệ?     \n) then ([Hợp lệ])
+else ([Không hợp lệ])
+ |Khách hàng|
+ :Nhập thông tin đăng nhập;
+ |BrewLite|
+ if (\n     Thông tin đăng nhập     \n     hợp lệ?     \n) then ([Hợp lệ])
+ else ([Không hợp lệ])
+  :Thông báo đăng nhập thất bại,\ngiữ nguyên giỏ hàng;
+  stop
+ endif
+endif
+|Khách hàng|
+:Chọn phương thức Ví/Thẻ, xác nhận đặt đơn;
+|BrewLite|
+:Validate giỏ hàng và tùy chọn,\ntính lại giá phía server;
+if (\n     Giỏ hàng hợp lệ và     \n     giá đã được xác nhận?     \n) then ([Đạt])
+else ([Không đạt])
+ :Trả lỗi / yêu cầu xác nhận giá mới,\ngiữ nguyên giỏ hàng;
+ stop
+endif
+:BEGIN, khóa dòng tồn kho;
+if (\n     Tồn kho đủ cho     \n     số lượng đặt?     \n) then ([Đủ hàng])
+ :Tạo Order PENDING_PAYMENT + OrderItem,\ntrừ lượng tồn khả dụng để giữ hàng, COMMIT;
+else ([Thiếu hàng])
+ :ROLLBACK, thông báo hết hàng,\nyêu cầu sửa giỏ hàng;
+ stop
+endif
+:Tạo / tra cứu Payment bằng idempotency key,\ngọi dịch vụ ngoài transaction;
+|Dịch vụ thanh toán|
+:Xử lý thanh toán Ví/Thẻ mô phỏng,\ntrả kết quả / callback;
+|BrewLite|
+while (\n     Thanh toán còn chờ     \n     kết quả cuối cùng?     \n) is ([Đang chờ])
+ :Giữ trạng thái PENDING,\nđối soát / tra cứu cùng key;
+ :Hiển thị đang xử lý, không tạo thanh toán mới;
+endwhile (\n     [Đã có kết quả cuối]     \n)
+if (\n     Kết quả     \n     thanh toán?     \n) then ([Thành công])
+ :Transaction: cập nhật Payment SUCCEEDED,\nOrder CONFIRMED đúng một lần;
+ |Khách hàng|
+ :Xem xác nhận và theo dõi đơn;
+ |Nhân viên quầy|
+ :Cập nhật PREPARING -> READY\n-> COMPLETED;
+ |Khách hàng|
+ :Xem trạng thái / lịch sử đơn;
+ stop
+else ([Thất bại])
+ |BrewLite|
+ :Transaction: Payment FAILED,\nOrder CANCELLED, hoàn tồn kho đúng một lần;
+ |Khách hàng|
+ :Xem lỗi, có thể sửa giỏ và đặt đơn mới;
+ stop
+endif
+
+@enduml
