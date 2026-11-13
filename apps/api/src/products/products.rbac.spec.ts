@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import * as request from 'supertest';
 import { AppModule } from '../app.module';
 import { setupApp } from '../app.setup';
+import { PrismaService } from '../prisma/prisma.service';
 
 /**
  * E2E (không cần DB): kiểm tra phân quyền thêm / sửa / xóa sản phẩm.
@@ -24,13 +25,38 @@ describe('Auth + phân quyền (e2e)', () => {
     sizes: [{ name: 'Size M', price: 5000 }],
   };
 
+  const prismaMock = {
+    order: {
+      create: jest.fn().mockResolvedValue({
+        id: 1,
+        userId: 'test-customer',
+        total: 50000,
+        status: 'PENDING',
+        createdAt: new Date(),
+        items: [
+          {
+            productId: '1',
+            productName: 'Trà Sữa Phúc Long',
+            size: 'M',
+            toppings: [],
+            note: null,
+            qty: 1,
+            unitPrice: 50000,
+          },
+        ],
+      }),
+    },
+  };
+
   beforeAll(async () => {
     process.env.JWT_SECRET = 'e2e_secret';
     process.env.BCRYPT_ROUNDS = '4';
 
-    const moduleRef = await Test.createTestingModule({
+    const moduleBuilder = Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    });
+    moduleBuilder.overrideProvider(PrismaService).useValue(prismaMock);
+    const moduleRef = await moduleBuilder.compile();
     app = moduleRef.createNestApplication();
     setupApp(app);
     await app.init();

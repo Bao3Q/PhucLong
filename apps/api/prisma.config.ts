@@ -3,7 +3,7 @@
 // URL kết nối giờ nằm ở đây.
 import 'dotenv/config';
 import path from 'node:path';
-import { defineConfig, env } from 'prisma/config';
+import { defineConfig } from 'prisma/config';
 
 export default defineConfig({
   schema: path.join('prisma', 'schema.prisma'),
@@ -11,6 +11,8 @@ export default defineConfig({
     path: path.join('prisma', 'migrations'),
   },
   datasource: {
-    url: env('DATABASE_URL'),
+    // Generate does not connect to the database; migration commands must use
+    // an explicitly configured DATABASE_URL instead of silently targeting a default.
+    url: process.env.DATABASE_URL ?? '',
   },
 });
