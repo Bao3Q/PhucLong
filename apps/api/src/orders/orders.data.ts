@@ -9,11 +9,10 @@ export interface OrderItem {
 }
 
 export interface Order {
-  id: string;
+  id: number;
+  userId: string;
   items: OrderItem[];
   totalAmount: number;
   status: 'PENDING_PAYMENT' | 'PAID' | 'PAYMENT_FAILED' | 'CANCELLED';
   createdAt: string;
 }
-
-export const ORDERS_DB: Order[] = [];

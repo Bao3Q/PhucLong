@@ -4,15 +4,15 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { OrdersService } from '../orders/orders.service';
-import {
-  PaymentRecord,
-  PAYMENTS_DB,
-  IDEMPOTENCY_STORE,
-} from './payments.data';
+import { PrismaService } from '../prisma/prisma.service';
+import { PaymentRecord } from './payments.data';
 
 @Injectable()
 export class PaymentsService {
-  constructor(private readonly ordersService: OrdersService) { }
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async processPayment(
     orderId: string,
@@ -20,8 +20,14 @@ export class PaymentsService {
     idempotencyKey?: string,
   ): Promise<PaymentRecord> {
 
-    if (idempotencyKey && IDEMPOTENCY_STORE.has(idempotencyKey)) {
-      return IDEMPOTENCY_STORE.get(idempotencyKey)!;
+    if (idempotencyKey) {
+      const existing = await this.prisma.payment.findFirst({
+        where: { idempotencyKey },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (existing) {
+        return this.toPaymentRecord(existing);
+      }
     }
 
 
@@ -34,30 +40,51 @@ export class PaymentsService {
 
     const transactionId = `TXN-${(method || 'CARD').toUpperCase()}-${Date.now().toString().slice(-6)}`;
 
-    const paymentRecord: PaymentRecord = {
-      id: `PAY-${Date.now().toString().slice(-6)}`,
-      orderId: order.id,
-      method: method || 'card',
-      amount: order.totalAmount,
-      status: 'SUCCEEDED',
-      transactionId,
-      idempotencyKey,
-      createdAt: new Date().toISOString(),
-    };
-
-
     await this.ordersService.updateStatus(order.id, 'PAID');
 
+    const payment = await this.prisma.payment.create({
+      data: {
+        userId: order.userId,
+        orderId: order.id,
+        method: method || 'card',
+        success: true,
+        idempotencyKey,
+        requestFingerprint: `${order.id}:${method || 'card'}`,
+        result: { transactionId, status: 'SUCCEEDED' },
+        amount: order.totalAmount,
+      },
+    });
 
-    PAYMENTS_DB.push(paymentRecord);
-    if (idempotencyKey) {
-      IDEMPOTENCY_STORE.set(idempotencyKey, paymentRecord);
-    }
-
-    return paymentRecord;
+    return this.toPaymentRecord(payment);
   }
 
   async getByOrderId(orderId: string): Promise<PaymentRecord | undefined> {
-    return PAYMENTS_DB.find((p) => p.orderId === orderId);
+    const payment = await this.prisma.payment.findFirst({
+      where: { orderId: Number(orderId) },
+      orderBy: { createdAt: 'desc' },
+    });
+    return payment ? this.toPaymentRecord(payment) : undefined;
+  }
+
+  private toPaymentRecord(payment: {
+    id: number;
+    orderId: number;
+    method: string;
+    amount: number;
+    result: unknown;
+    idempotencyKey: string | null;
+    createdAt: Date;
+  }): PaymentRecord {
+    const result = payment.result as { transactionId?: string };
+    return {
+      id: payment.id,
+      orderId: payment.orderId,
+      method: payment.method as 'momo' | 'card',
+      amount: payment.amount,
+      status: 'SUCCEEDED',
+      transactionId: result.transactionId ?? `TXN-${payment.id}`,
+      idempotencyKey: payment.idempotencyKey ?? undefined,
+      createdAt: payment.createdAt.toISOString(),
+    };
   }
 }
