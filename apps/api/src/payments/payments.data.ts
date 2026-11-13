@@ -1,6 +1,6 @@
 export interface PaymentRecord {
-  id: string;
-  orderId: string;
+  id: number;
+  orderId: number;
   method: 'momo' | 'card';
   amount: number;
   status: 'SUCCEEDED' | 'FAILED';
@@ -8,6 +8,3 @@ export interface PaymentRecord {
   idempotencyKey?: string;
   createdAt: string;
 }
-
-export const PAYMENTS_DB: PaymentRecord[] = [];
-export const IDEMPOTENCY_STORE = new Map<string, PaymentRecord>();
