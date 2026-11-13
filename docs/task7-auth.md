@@ -1,30 +1,18 @@
-# 5. Task 7 – Đăng ký / Đăng nhập (JWT) & Phân quyền
+# Task 7 – Đăng ký / Đăng nhập (JWT)
+
+Theo đề: `POST /auth/register`, `POST /auth/login`; băm mật khẩu bằng bcrypt; phát JWT; guard bảo vệ route đặt đơn.
 
 | Method | Endpoint | Quyền | Kết quả |
 | :-- | :-- | :-- | :-- |
-| POST | `/auth/register` | Công khai | 201 + user (luôn role `CUSTOMER`), 409 trùng email, 400 dữ liệu sai |
-| POST | `/auth/login` | Công khai | 200 + `accessToken` (JWT HS256), 401 sai email/mật khẩu |
-| GET | `/auth/me` | Có JWT | 200 + user hiện tại, 401 nếu thiếu/sai token |
+| POST | `/auth/register` | Công khai | 201 + user (luôn role `CUSTOMER`); 409 trùng email; 400 dữ liệu sai |
+| POST | `/auth/login` | Công khai | 200 + `accessToken` (JWT HS256, 1 giờ); 401 sai email/mật khẩu |
+| POST | `/orders` | Có JWT | 201; không có / sai token → 401 |
 | GET | `/products`, `/products/:id` | Công khai | Xem menu |
-| POST | `/products` | **ADMIN** | 201; không JWT → 401; CUSTOMER → 403 |
-| PATCH | `/products/:id` | **ADMIN** | 200 / 404; không JWT → 401; CUSTOMER → 403 |
-| DELETE | `/products/:id` | **ADMIN** | 200 / 404; không JWT → 401; CUSTOMER → 403 |
+| POST / PATCH / DELETE | `/products`, `/products/:id` | **ADMIN** | 401 chưa đăng nhập; 403 với CUSTOMER |
 
-- Mật khẩu băm bằng **bcrypt**, JWT ký HS256 bằng `JWT_SECRET`, thời hạn theo `JWT_EXPIRATION` (mặc định 1 giờ).
-- Guard: `JwtAuthGuard` (xác thực) + `RolesGuard` với `@Roles('ADMIN')` (phân quyền). Route đặt đơn (Task 6) chỉ cần `@UseGuards(JwtAuthGuard)`.
-- Tài khoản ADMIN tạo sẵn khi API chạy: `ADMIN_EMAIL` / `ADMIN_PASSWORD` (mặc định dev `admin@phuclong.vn` / `Admin@123456`). Đăng ký công khai không thể tự tạo ADMIN.
-- Kho user hiện lưu trong bộ nhớ (giống `ProductsService`), khởi động lại API sẽ mất user đã đăng ký.
-- Test: `cd apps/api && npm test` (unit bcrypt/JWT/guard + e2e phân quyền 401/403/200).
-
-Thử nhanh bằng curl:
-
-```bash
-# 1. Đăng nhập admin lấy token
-curl -X POST http://localhost:4000/auth/login -H "Content-Type: application/json" \
-  -d '{"email":"admin@phuclong.vn","password":"Admin@123456"}'
-
-# 2. Thêm sản phẩm (thay <TOKEN>)
-curl -X POST http://localhost:4000/products -H "Authorization: Bearer <TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Trà Đào","category":"Trà Trái Cây","basePrice":39000,"image":"https://example.com/a.jpg"}'
-```
+- Mật khẩu băm bằng bcrypt; JWT ký bằng `JWT_SECRET` (đặt trong `.env`).
+- Guard: `JwtAuthGuard` (xác thực), `RolesGuard` + `@Roles('ADMIN')` (phân quyền) – cùng cách làm với đồ án Maycha.
+- Tài khoản ADMIN có sẵn (lấy từ `prisma/schema.sql`): `admin@maycha.vn` / `Admin@123456`.
+- Kho user hiện lưu trong bộ nhớ, khởi động lại API sẽ mất user đã đăng ký.
+- Web: trang `/login` (đăng nhập / đăng ký) lưu token ở `localStorage` (`accessToken`); trang thanh toán gửi `Authorization: Bearer <token>` khi tạo đơn, chưa đăng nhập thì chuyển sang `/login`.
+- Test: `cd apps/api && npm test`.
