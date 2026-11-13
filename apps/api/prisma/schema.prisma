@@ -1,18 +1,9 @@
-// BrewLite – Prisma schema
-// Khớp 1:1 với prisma/schema.sql (migration SQL thuần).
-//
-// Ràng buộc Prisma không biểu diễn được (giữ nguyên ở tầng SQL):
-//   * Payment: chỉ 1 payment SUCCESS mỗi order (partial unique index)
-//   * LoyaltyTransaction: chặn EARN trùng orderId và ràng buộc dấu điểm theo type
-//   * Các CHECK constraint khác (điểm dương/âm, giá trị giảm giá...)
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum OrderStatus {
