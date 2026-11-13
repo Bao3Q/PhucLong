@@ -1,5 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Product, SEED_PRODUCTS } from './products.data';
+import { Product, ProductOption, SEED_PRODUCTS } from './products.data';
+import { CreateProductDto } from './dto/create-product.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
+
+/** Gán id tăng dần cho danh sách size / topping mới. */
+function withIds(options: { name: string; price: number }[] = []): ProductOption[] {
+  return options.map((o, i) => ({ id: i + 1, name: o.name, price: o.price }));
+}
 
 @Injectable()
 export class ProductsService {
@@ -20,5 +27,48 @@ export class ProductsService {
       throw new NotFoundException(`Product with ID ${id} not found`);
     }
     return product;
+  }
+
+  /** ADMIN: thêm sản phẩm mới. */
+  async create(dto: CreateProductDto): Promise<Product> {
+    const nextId = this.products.reduce((max, p) => Math.max(max, p.id), 0) + 1;
+    const product: Product = {
+      id: nextId,
+      name: dto.name,
+      category: dto.category,
+      basePrice: dto.basePrice,
+      description: dto.description ?? '',
+      image: dto.image,
+      tag: dto.tag ?? null,
+      sizes: withIds(dto.sizes),
+      toppings: withIds(dto.toppings),
+    };
+    this.products = [...this.products, product];
+    return product;
+  }
+
+  /** ADMIN: sửa một phần sản phẩm. */
+  async update(id: number, dto: UpdateProductDto): Promise<Product> {
+    const current = await this.findOne(id);
+    const updated: Product = {
+      ...current,
+      ...(dto.name !== undefined && { name: dto.name }),
+      ...(dto.category !== undefined && { category: dto.category }),
+      ...(dto.basePrice !== undefined && { basePrice: dto.basePrice }),
+      ...(dto.description !== undefined && { description: dto.description }),
+      ...(dto.image !== undefined && { image: dto.image }),
+      ...(dto.tag !== undefined && { tag: dto.tag }),
+      ...(dto.sizes !== undefined && { sizes: withIds(dto.sizes) }),
+      ...(dto.toppings !== undefined && { toppings: withIds(dto.toppings) }),
+    };
+    this.products = this.products.map((p) => (p.id === id ? updated : p));
+    return updated;
+  }
+
+  /** ADMIN: xóa sản phẩm. */
+  async remove(id: number): Promise<{ deleted: true; id: number }> {
+    await this.findOne(id);
+    this.products = this.products.filter((p) => p.id !== id);
+    return { deleted: true, id };
   }
 }

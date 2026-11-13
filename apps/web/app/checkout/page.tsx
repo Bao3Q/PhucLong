@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { CartItem } from '@/app/types';
+import { clearToken, getToken } from '@/lib/auth';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -34,6 +35,14 @@ export default function CheckoutPage() {
 
   const handleConfirmPayment = async () => {
     if (cart.length === 0) return;
+
+    // Đặt đơn cần đăng nhập: chưa có token thì chuyển sang /login rồi quay lại đây.
+    const token = getToken();
+    if (!token) {
+      router.push('/login?next=/checkout');
+      return;
+    }
+
     setIsSubmitting(true);
     setErrorMessage(null);
 
@@ -51,9 +60,19 @@ export default function CheckoutPage() {
 
       const orderRes = await fetch(`${API_BASE_URL}/orders`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify(orderPayload),
       });
+
+      if (orderRes.status === 401) {
+        // Token hết hạn hoặc không hợp lệ → đăng nhập lại.
+        clearToken();
+        router.push('/login?next=/checkout');
+        return;
+      }
 
       if (!orderRes.ok) {
         throw new Error(`Tạo đơn thất bại (${orderRes.status})`);
