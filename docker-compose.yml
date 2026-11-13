@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file:
+      - .env.example
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-phuclong_db}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /workspace
+    command:
+      - sh
+      - -c
+      - >-
+        cd apps/api &&
+        npx prisma generate &&
+        npx prisma migrate deploy &&
+        cd ../.. &&
+        npm run dev:docker
+    env_file:
+      - .env.example
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-phuclong_db}?schema=public"
+      PORT: ${PORT:-4000}
+      NODE_ENV: ${NODE_ENV:-development}
+      JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-key-for-brewlite-project-2026}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-1d}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+    ports:
+      - "3000:3000"
+      - "${PORT:-4000}:${PORT:-4000}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/workspace
+      - root_node_modules:/workspace/node_modules
+      - api_node_modules:/workspace/apps/api/node_modules
+      - web_node_modules:/workspace/apps/web/node_modules
+      - web_next:/workspace/apps/web/.next
+
+volumes:
+  postgres_data:
+  root_node_modules:
+  api_node_modules:
+  web_node_modules:
+  web_next:

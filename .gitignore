@@ -21,6 +21,7 @@ yarn-error.log*
 coverage/
 .turbo/
 *.tsbuildinfo
+.codex/
 
 # Prisma generated client
 apps/api/src/generated/
