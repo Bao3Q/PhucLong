@@ -1,0 +1,210 @@
+import { INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import * as request from 'supertest';
+import { AppModule } from '../app.module';
+import { setupApp } from '../app.setup';
+
+/**
+ * E2E (không cần DB): kiểm tra phân quyền thêm / sửa / xóa sản phẩm.
+ * - Không đăng nhập → 401
+ * - CUSTOMER        → 403
+ * - ADMIN           → được phép
+ */
+describe('Products RBAC (e2e)', () => {
+  let app: INestApplication;
+  let http: ReturnType<INestApplication['getHttpServer']>;
+  let adminToken: string;
+  let customerToken: string;
+
+  const newProduct = {
+    name: 'Trà Đào Test',
+    category: 'Trà Trái Cây',
+    basePrice: 39000,
+    image: 'https://example.com/tra-dao.jpg',
+    sizes: [{ name: 'Size M', price: 5000 }],
+  };
+
+  beforeAll(async () => {
+    process.env.JWT_SECRET = 'e2e_secret';
+    process.env.BCRYPT_ROUNDS = '4';
+    process.env.NODE_ENV = 'test';
+    delete process.env.ADMIN_EMAIL;
+    delete process.env.ADMIN_PASSWORD;
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    setupApp(app);
+    await app.init(); // chạy onModuleInit → seed admin
+    http = app.getHttpServer();
+
+    const admin = await request(http)
+      .post('/auth/login')
+      .send({ email: 'admin@phuclong.vn', password: 'Admin@123456' });
+    adminToken = admin.body.accessToken;
+
+    await request(http)
+      .post('/auth/register')
+      .send({ email: 'khach@phuclong.vn', password: 'matkhau123' })
+      .expect(201);
+    const customer = await request(http)
+      .post('/auth/login')
+      .send({ email: 'khach@phuclong.vn', password: 'matkhau123' })
+      .expect(200);
+    customerToken = customer.body.accessToken;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  describe('xem menu (công khai)', () => {
+    it('GET /products không cần token', async () => {
+      const res = await request(http).get('/products').expect(200);
+      expect(res.body.length).toBeGreaterThan(0);
+    });
+    it('GET /products/1 không cần token', async () => {
+      await request(http).get('/products/1').expect(200);
+    });
+  });
+
+  describe('đăng ký / đăng nhập', () => {
+    it('đăng ký trùng email → 409', async () => {
+      await request(http)
+        .post('/auth/register')
+        .send({ email: 'KHACH@phuclong.vn', password: 'matkhau123' })
+        .expect(409);
+    });
+    it('mật khẩu quá ngắn → 400', async () => {
+      await request(http)
+        .post('/auth/register')
+        .send({ email: 'a@b.vn', password: '123' })
+        .expect(400);
+    });
+    it('sai mật khẩu → 401', async () => {
+      await request(http)
+        .post('/auth/login')
+        .send({ email: 'khach@phuclong.vn', password: 'sai-mat-khau' })
+        .expect(401);
+    });
+    it('không thể tự đăng ký làm ADMIN', async () => {
+      const res = await request(http)
+        .post('/auth/register')
+        .send({ email: 'hack@phuclong.vn', password: 'matkhau123', role: 'ADMIN' })
+        .expect(201);
+      expect(res.body.role).toBe('CUSTOMER');
+    });
+    it('GET /auth/me: 401 khi không có token, 200 khi có', async () => {
+      await request(http).get('/auth/me').expect(401);
+      const res = await request(http)
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${customerToken}`)
+        .expect(200);
+      expect(res.body).toMatchObject({
+        email: 'khach@phuclong.vn',
+        role: 'CUSTOMER',
+      });
+      expect(res.body).not.toHaveProperty('passwordHash');
+    });
+  });
+
+  describe('chưa đăng nhập → 401', () => {
+    it('POST /products', async () => {
+      await request(http).post('/products').send(newProduct).expect(401);
+    });
+    it('PATCH /products/1', async () => {
+      await request(http).patch('/products/1').send({ name: 'X' }).expect(401);
+    });
+    it('DELETE /products/1', async () => {
+      await request(http).delete('/products/1').expect(401);
+    });
+    it('token giả → 401', async () => {
+      await request(http)
+        .post('/products')
+        .set('Authorization', 'Bearer khong.hop.le')
+        .send(newProduct)
+        .expect(401);
+    });
+  });
+
+  describe('CUSTOMER → 403 (không được thêm / sửa / xóa)', () => {
+    const auth = () => ({ Authorization: `Bearer ${customerToken}` });
+
+    it('POST /products', async () => {
+      await request(http)
+        .post('/products')
+        .set(auth())
+        .send(newProduct)
+        .expect(403);
+    });
+    it('PATCH /products/1', async () => {
+      await request(http)
+        .patch('/products/1')
+        .set(auth())
+        .send({ name: 'Bị sửa trái phép' })
+        .expect(403);
+    });
+    it('DELETE /products/1', async () => {
+      await request(http).delete('/products/1').set(auth()).expect(403);
+    });
+    it('sản phẩm vẫn nguyên vẹn sau các lần bị từ chối', async () => {
+      const res = await request(http).get('/products/1').expect(200);
+      expect(res.body.name).not.toBe('Bị sửa trái phép');
+    });
+  });
+
+  describe('ADMIN → được thêm / sửa / xóa', () => {
+    const auth = () => ({ Authorization: `Bearer ${adminToken}` });
+    let createdId: number;
+
+    it('POST /products → 201', async () => {
+      const res = await request(http)
+        .post('/products')
+        .set(auth())
+        .send(newProduct)
+        .expect(201);
+      createdId = res.body.id;
+      expect(res.body).toMatchObject({ name: 'Trà Đào Test', basePrice: 39000 });
+      expect(res.body.sizes).toEqual([{ id: 1, name: 'Size M', price: 5000 }]);
+      await request(http).get(`/products/${createdId}`).expect(200);
+    });
+
+    it('POST /products dữ liệu sai → 400', async () => {
+      await request(http)
+        .post('/products')
+        .set(auth())
+        .send({ name: '', basePrice: -5 })
+        .expect(400);
+    });
+
+    it('PATCH /products/:id → 200', async () => {
+      const res = await request(http)
+        .patch(`/products/${createdId}`)
+        .set(auth())
+        .send({ basePrice: 42000 })
+        .expect(200);
+      expect(res.body).toMatchObject({ name: 'Trà Đào Test', basePrice: 42000 });
+    });
+
+    it('PATCH sản phẩm không tồn tại → 404', async () => {
+      await request(http)
+        .patch('/products/999999')
+        .set(auth())
+        .send({ name: 'X' })
+        .expect(404);
+    });
+
+    it('DELETE /products/:id → 200 rồi GET → 404', async () => {
+      await request(http)
+        .delete(`/products/${createdId}`)
+        .set(auth())
+        .expect(200);
+      await request(http).get(`/products/${createdId}`).expect(404);
+    });
+
+    it('DELETE sản phẩm không tồn tại → 404', async () => {
+      await request(http).delete('/products/999999').set(auth()).expect(404);
+    });
+  });
+});
