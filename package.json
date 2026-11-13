@@ -3,15 +3,19 @@
   "version": "1.0.0",
   "private": true,
   "description": "BrewLite Phúc Long Platform Monorepo",
+  "workspaces": [
+    "apps/web",
+    "apps/api"
+  ],
   "scripts": {
     "dev": "concurrently -n \"API,WEB\" -c \"blue,green\" \"npm run dev:api\" \"npm run dev:web\"",
     "dev:api": "npm --prefix apps/api run start:dev",
     "dev:web": "npm --prefix apps/web run dev",
     "build": "concurrently \"npm --prefix apps/api run build\" \"npm --prefix apps/web run build\"",
+    "test": "npm --prefix apps/api run test",
     "install:all": "npm install && npm --prefix apps/api install && npm --prefix apps/web install"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
   }
 }
-
