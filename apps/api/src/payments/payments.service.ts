@@ -15,7 +15,7 @@ export class PaymentsService {
   ) {}
 
   async processPayment(
-    orderId: string,
+    orderId: string | number,
     method: 'momo' | 'card',
     idempotencyKey?: string,
   ): Promise<PaymentRecord> {
@@ -58,7 +58,7 @@ export class PaymentsService {
     return this.toPaymentRecord(payment);
   }
 
-  async getByOrderId(orderId: string): Promise<PaymentRecord | undefined> {
+  async getByOrderId(orderId: string | number): Promise<PaymentRecord | undefined> {
     const payment = await this.prisma.payment.findFirst({
       where: { orderId: Number(orderId) },
       orderBy: { createdAt: 'desc' },

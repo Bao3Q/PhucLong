@@ -13,6 +13,13 @@ export interface Order {
   userId: string;
   items: OrderItem[];
   totalAmount: number;
-  status: 'PENDING_PAYMENT' | 'PAID' | 'PAYMENT_FAILED' | 'CANCELLED';
+  status:
+    | 'PENDING_PAYMENT'
+    | 'PAID'
+    | 'PAYMENT_FAILED'
+    | 'PREPARING'
+    | 'READY'
+    | 'COMPLETED'
+    | 'CANCELLED';
   createdAt: string;
 }
