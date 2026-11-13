@@ -1,71 +1,61 @@
 'use client';
 
-import React, { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function OrderSuccessPage() {
+function OrderSuccessContent() {
   const router = useRouter();
-
-  // Xóa giỏ hàng ngay khi người dùng hoàn tất thanh toán và tới trang này
-  useEffect(() => {
-    localStorage.removeItem('phuclong_cart');
-  }, []);
+  const searchParams = useSearchParams();
+  const orderId = searchParams.get('orderId') || 'ORD-UNKNOWN';
+  const transId = searchParams.get('transId') || 'TXN-MOCK';
 
   return (
-    <div className="min-h-screen bg-[#F7F6F2] flex items-center justify-center p-4">
-      <div className="bg-white max-w-lg w-full rounded-3xl p-8 shadow-xl text-center space-y-6">
-        <div className="w-16 h-16 bg-[#006A32] text-white rounded-full flex items-center justify-center text-2xl mx-auto shadow-lg shadow-[#006A32]/30">
-          ✓
-        </div>
-
-        <div className="space-y-1">
-          <span className="text-xs font-bold uppercase tracking-widest text-amber-700">THANH TOÁN THÀNH CÔNG</span>
-          <h1 className="text-3xl font-bold text-gray-900">Cảm ơn bạn!</h1>
-          <p className="text-xs text-gray-500 max-w-xs mx-auto">
-            Đơn hàng đã được gửi đến quầy pha chế. Chúng tôi sẽ chuẩn bị thật nhanh cho bạn.
-          </p>
-        </div>
-
-        <div className="bg-gray-50 p-4 rounded-2xl flex justify-between items-center text-sm font-semibold">
-          <span className="text-gray-400 text-xs">Mã đơn hàng</span>
-          <span className="text-gray-900 font-extrabold">#1042</span>
-          <span className="bg-emerald-100 text-[#006A32] px-2.5 py-0.5 rounded-md text-xs font-bold">PAID</span>
-        </div>
-
-        <div className="flex justify-between items-center text-[10px] font-semibold text-gray-400 relative px-4">
-          <div className="text-center text-[#006A32]">
-            <div className="w-5 h-5 bg-[#006A32] text-white rounded-full mx-auto flex items-center justify-center text-[8px] mb-1">✓</div>
-            Pending
-          </div>
-          <div className="text-center text-[#006A32]">
-            <div className="w-5 h-5 bg-[#006A32] text-white rounded-full mx-auto flex items-center justify-center text-[8px] mb-1">✓</div>
-            Paid
-          </div>
-          <div className="text-center">
-            <div className="w-5 h-5 bg-gray-200 rounded-full mx-auto mb-1"></div>
-            Preparing
-          </div>
-          <div className="text-center">
-            <div className="w-5 h-5 bg-gray-200 rounded-full mx-auto mb-1"></div>
-            Ready
-          </div>
-        </div>
-
-        <div className="bg-[#F4EBE1] p-4 rounded-2xl text-left flex items-center space-x-3">
-          <span className="text-2xl">🛍️</span>
-          <div className="text-xs">
-            <h5 className="font-bold text-gray-900">Mời tới quầy lấy nước</h5>
-            <p className="text-gray-600">Vui lòng đưa mã <span className="font-bold text-[#006A32]">#1042</span> cho nhân viên</p>
-          </div>
-        </div>
-
-        <button 
-          onClick={() => router.push('/')}
-          className="w-full border border-gray-300 text-gray-700 py-3 rounded-2xl font-bold hover:bg-gray-50 transition"
-        >
-          Về trang chủ
-        </button>
+    <div className="bg-white p-8 md:p-12 rounded-3xl border border-stone-200/80 shadow-xl max-w-md w-full text-center space-y-6">
+      <div className="w-20 h-20 bg-emerald-50 text-[#006A32] rounded-full flex items-center justify-center text-4xl mx-auto shadow-inner">
+        ✓
       </div>
+
+      <div className="space-y-2">
+        <span className="text-[10px] font-black uppercase tracking-widest text-[#006A32] bg-emerald-50 px-3 py-1 rounded-full">
+          GIAO DỊCH THÀNH CÔNG
+        </span>
+        <h1 className="text-2xl font-black text-stone-900">Đặt Hàng Thành Công!</h1>
+        <p className="text-xs text-stone-500">
+          Cảm ơn bạn đã lựa chọn Phúc Long. Quầy bar đang chuẩn bị món nước cho bạn.
+        </p>
+      </div>
+
+      <div className="bg-stone-50 rounded-2xl p-4 text-left space-y-2.5 border border-stone-200/60 text-xs">
+        <div className="flex justify-between">
+          <span className="text-stone-400">Mã đơn hàng:</span>
+          <span className="font-extrabold text-stone-900">{orderId}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-stone-400">Mã giao dịch:</span>
+          <span className="font-semibold text-stone-700">{transId}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-stone-400">Trạng thái đơn:</span>
+          <span className="font-bold text-emerald-600">ĐÃ THANH TOÁN (PAID)</span>
+        </div>
+      </div>
+
+      <button
+        onClick={() => router.push('/')}
+        className="w-full bg-[#006A32] hover:bg-[#005227] text-white py-3.5 rounded-2xl font-bold text-sm shadow-lg shadow-[#006A32]/25 active:scale-95 transition-all"
+      >
+        Tiếp tục đặt món
+      </button>
+    </div>
+  );
+}
+
+export default function OrderSuccessPage() {
+  return (
+    <div className="min-h-screen bg-[#F7F6F2] flex items-center justify-center p-6">
+      <Suspense fallback={<div className="text-stone-500 font-bold">Đang tải...</div>}>
+        <OrderSuccessContent />
+      </Suspense>
     </div>
   );
 }
