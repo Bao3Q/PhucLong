@@ -191,12 +191,14 @@ CREATE INDEX IF NOT EXISTS "Promotion_active_dates_idx"
 -- Product
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS "Product" (
-    "id"       TEXT    NOT NULL,
-    "name"     TEXT    NOT NULL,
-    "price"    INTEGER NOT NULL,
-    "imageUrl" TEXT    NOT NULL,
-    "stock"    INTEGER NOT NULL DEFAULT 0,
-    "version"  INTEGER NOT NULL DEFAULT 0,
+    "id"          TEXT    NOT NULL,
+    "name"        TEXT    NOT NULL,
+    "price"       INTEGER NOT NULL,
+    "imageUrl"    TEXT    NOT NULL,
+    "description" TEXT,
+    "tag"         TEXT,
+    "stock"       INTEGER NOT NULL DEFAULT 0,
+    "version"     INTEGER NOT NULL DEFAULT 0,
 
     CONSTRAINT "Product_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "Product_price_check" CHECK ("price" >= 0),
@@ -254,6 +256,7 @@ CREATE TABLE IF NOT EXISTS "OrderItem" (
     "productName" TEXT          NOT NULL,
     "size"        "ProductSize" NOT NULL,
     "toppings"    TEXT[]        NOT NULL DEFAULT ARRAY[]::TEXT[],
+    "note"        TEXT,
     "qty"         INTEGER       NOT NULL,
     "unitPrice"   INTEGER       NOT NULL,
     "lineTotal"   INTEGER       NOT NULL,
@@ -335,6 +338,12 @@ CREATE TABLE IF NOT EXISTS "LoyaltyTransaction" (
     CONSTRAINT "LoyaltyTransaction_points_check" CHECK ("points" <> 0),
     CONSTRAINT "LoyaltyTransaction_balanceAfter_check"
         CHECK ("balanceAfter" >= 0),
+    CONSTRAINT "LoyaltyTransaction_type_points_check"
+        CHECK (
+            ("type" = 'EARN' AND "points" > 0)
+            OR ("type" IN ('REDEEM', 'EXPIRE') AND "points" < 0)
+            OR ("type" = 'ADJUST')
+        ),
     CONSTRAINT "LoyaltyTransaction_userId_fkey"
         FOREIGN KEY ("userId") REFERENCES "User" ("id")
         ON DELETE CASCADE ON UPDATE CASCADE,
@@ -363,6 +372,7 @@ CREATE TABLE IF NOT EXISTS "Ingredient" (
     "updatedAt" TIMESTAMP(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Ingredient_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "Ingredient_name_key" UNIQUE ("name"),
     CONSTRAINT "Ingredient_quantity_check" CHECK ("quantity" >= 0)
 );
 
@@ -409,8 +419,37 @@ ALTER TABLE "User"
 ALTER TABLE "Product"
     ADD COLUMN IF NOT EXISTS "version" INTEGER NOT NULL DEFAULT 0;
 
+ALTER TABLE "Product"
+    ADD COLUMN IF NOT EXISTS "description" TEXT;
+
+ALTER TABLE "Product"
+    ADD COLUMN IF NOT EXISTS "tag" TEXT;
+
 ALTER TABLE "Payment"
     ADD COLUMN IF NOT EXISTS "amount" INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE "OrderItem"
+    ADD COLUMN IF NOT EXISTS "note" TEXT;
+
+-- Unique cho tên nguyên liệu trên database đã có sẵn
+-- (bỏ qua nếu constraint đã tồn tại, hoặc table chưa có)
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_tables
+        WHERE schemaname = 'public' AND tablename = 'Ingredient'
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'Ingredient_name_key'
+    ) THEN
+        ALTER TABLE "Ingredient"
+            ADD CONSTRAINT "Ingredient_name_key" UNIQUE ("name");
+    END IF;
+END
+$$;
 
 -- Tài khoản ADMIN mặc định để đăng nhập / thử API (Thunder Client, Postman...).
 -- Email    : admin@maycha.vn
@@ -428,5 +467,56 @@ VALUES (
 ON CONFLICT ("email") DO UPDATE
 SET "role" = 'ADMIN',
     "passwordHash" = EXCLUDED."passwordHash";
+
+-- Menu mẫu, khớp dữ liệu mock ở apps/web/app/page.tsx
+INSERT INTO "Product" ("id", "name", "price", "imageUrl", "description", "tag", "stock", "version")
+VALUES
+  ('tra-sua-phuc-long',
+   'Trà Sữa Phúc Long',
+   45000,
+   'https://images.unsplash.com/photo-1558857563-b371033873b8?w=500&auto=format&fit=crop&q=60',
+   'Trà đậm vị truyền thống kết hợp sữa thơm béo đặc trưng',
+   'BÁN CHẠY',
+   100, 0),
+  ('tra-dao-tram-huong',
+   'Trà Đào Trầm Hương',
+   55000,
+   'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=500&auto=format&fit=crop&q=60',
+   'Đào miếng tươi giòn, nền trà ô long thanh mát ngọt dịu',
+   'MỚI',
+   100, 0),
+  ('ca-phe-sua-da',
+   'Cà Phê Sữa Đá',
+   35000,
+   'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?w=500&auto=format&fit=crop&q=60',
+   'Hạt Robusta đậm đà hòa quyện cùng sữa đặc truyền thống',
+   NULL,
+   100, 0),
+  ('cappuccino-espresso',
+   'Cappuccino Espresso',
+   45000,
+   'https://images.unsplash.com/photo-1572442388796-11668a67e53d?w=500&auto=format&fit=crop&q=60',
+   'Espresso rang đậm phủ lớp bọt sữa nóng mịn mượt',
+   NULL,
+   100, 0)
+ON CONFLICT ("id") DO NOTHING;
+
+-- Ba nguyên liệu cơ bản: đường, sữa, cà phê
+INSERT INTO "Ingredient" ("name", "quantity", "unit")
+VALUES
+  ('Đường',  5000,  'g'),
+  ('Sữa',    10000, 'ml'),
+  ('Cà phê', 3000,  'g')
+ON CONFLICT ("name") DO NOTHING;
+
+-- Voucher mẫu dùng cho /promotions/validate
+INSERT INTO "Promotion" ("code", "name", "description", "discountType", "discountValue",
+                         "maxDiscountAmount", "minOrderAmount", "usageLimit", "isActive")
+VALUES
+  ('WELCOME10',
+   'Giảm 10% đơn đầu tiên',
+   'Giảm 10% tối đa 20.000đ cho đơn từ 50.000đ',
+   'PERCENT', 10, 20000, 50000, 1000, TRUE)
+ON CONFLICT ("code") DO NOTHING;
 
 COMMIT;

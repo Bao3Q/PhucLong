@@ -1,0 +1,197 @@
+// BrewLite – Prisma schema
+// Khớp 1:1 với prisma/schema.sql (migration SQL thuần).
+//
+// Ràng buộc Prisma không biểu diễn được (giữ nguyên ở tầng SQL):
+//   * Payment: chỉ 1 payment SUCCESS mỗi order (partial unique index)
+//   * LoyaltyTransaction: chặn EARN trùng orderId và ràng buộc dấu điểm theo type
+//   * Các CHECK constraint khác (điểm dương/âm, giá trị giảm giá...)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  PAYMENT_FAILED
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+enum ProductSize {
+  S
+  M
+  L
+}
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+}
+
+enum PaymentMethod {
+  WALLET
+  CARD
+  CASH
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum DiscountType {
+  PERCENT
+  FIXED
+}
+
+enum LoyaltyTransactionType {
+  EARN
+  REDEEM
+  ADJUST
+  EXPIRE
+}
+
+model User {
+  id                  String   @id @default(uuid())
+  email               String   @unique
+  passwordHash        String
+  role                UserRole @default(CUSTOMER)
+  loyaltyPoints       Int      @default(0)
+  createdAt           DateTime @default(now())
+
+  orders              Order[]
+  loyaltyTransactions LoyaltyTransaction[]
+}
+
+model Product {
+  id          String  @id @default(cuid())
+  name        String
+  price       Int
+  imageUrl    String
+  description String?
+  tag         String?
+  stock       Int     @default(0)
+  version     Int     @default(0)
+
+  orderItems  OrderItem[]
+
+  @@index([name])
+}
+
+model Promotion {
+  id                Int          @id @default(autoincrement())
+  code              String       @unique
+  name              String
+  description       String?
+  discountType      DiscountType
+  discountValue     Int
+  maxDiscountAmount Int?
+  minOrderAmount    Int          @default(0)
+  usageLimit        Int?
+  usedCount         Int          @default(0)
+  isActive          Boolean      @default(true)
+  startsAt          DateTime     @default(now())
+  endsAt            DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @default(now()) @updatedAt
+
+  orders            Order[]
+}
+
+model Order {
+  id             Int         @id @default(autoincrement())
+  userId         String
+  status         OrderStatus @default(PENDING)
+  subtotal       Int         @default(0)
+  discountAmount Int         @default(0)
+  voucherCode    String?
+  total          Int
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @default(now()) @updatedAt
+
+  user           User        @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  promotion      Promotion?  @relation(fields: [voucherCode], references: [code], onDelete: SetNull, onUpdate: Cascade)
+
+  items                OrderItem[]
+  payments             Payment[]
+  loyaltyTransactions  LoyaltyTransaction[]
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@index([voucherCode])
+}
+
+model OrderItem {
+  id          Int         @id @default(autoincrement())
+  orderId     Int
+  productId   String
+  productName String
+  size        ProductSize
+  toppings    String[]    @default([])
+  note        String?
+  qty         Int
+  unitPrice   Int
+  lineTotal   Int
+
+  order       Order       @relation(fields: [orderId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  product     Product     @relation(fields: [productId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model Payment {
+  id             Int           @id @default(autoincrement())
+  orderId        Int
+  amount         Int           @default(0)
+  method         PaymentMethod @default(WALLET)
+  status         PaymentStatus @default(PENDING)
+  provider       String        @default("MOCK")
+  transactionRef String?       @unique
+  idempotencyKey String        @unique
+  failureReason  String?
+  paidAt         DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @default(now()) @updatedAt
+
+  order          Order         @relation(fields: [orderId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([orderId, createdAt])
+  @@index([status])
+}
+
+model LoyaltyTransaction {
+  id           Int                    @id @default(autoincrement())
+  userId       String
+  orderId      Int?
+  type         LoyaltyTransactionType
+  points       Int
+  balanceAfter Int
+  description  String?
+  createdAt    DateTime               @default(now())
+
+  user         User                   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  order        Order?                 @relation(fields: [orderId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([orderId])
+}
+
+model Ingredient {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  quantity  Decimal  @default(0) @db.Decimal(10, 2)
+  unit      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+}
