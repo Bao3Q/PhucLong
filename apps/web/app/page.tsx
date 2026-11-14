@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import ProductModal from '@/components/ProductModal';
+import AuthButton from '@/components/AuthButton';
 import { Product, CartItem } from '@/app/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -96,8 +97,9 @@ export default function Home() {
         <div className="flex items-center space-x-6 text-sm font-semibold text-stone-600">
           <span className="text-[#006A32] font-bold border-b-2 border-[#006A32] pb-0.5 cursor-pointer">Menu Đồ Uống</span>
           <span className="cursor-pointer hover:text-stone-900 transition">Lịch sử đơn</span>
-          
-          <button 
+          <AuthButton />
+
+          <button
             onClick={() => router.push('/checkout')} 
             className="bg-[#006A32] hover:bg-[#005227] text-white px-6 py-3 rounded-full font-bold flex items-center space-x-3 shadow-lg shadow-[#006A32]/25 hover:shadow-xl hover:shadow-[#006A32]/30 active:scale-95 transition-all duration-200 text-sm"
           >

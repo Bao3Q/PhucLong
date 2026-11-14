@@ -19,8 +19,13 @@ export class OrdersController {
     return this.ordersService.createOrder(request.user, items || []);
   }
 
+  // Xem chi tiết đơn cần đăng nhập; chỉ chủ đơn hoặc ADMIN được xem (người khác → 403)
   @Get(':id')
-  async getById(@Param('id') id: string) {
-    return this.ordersService.findOne(id);
+  @UseGuards(JwtAuthGuard)
+  async getById(
+    @Req() request: Request & { user: AuthUser },
+    @Param('id') id: string,
+  ) {
+    return this.ordersService.findOne(id, request.user);
   }
 }

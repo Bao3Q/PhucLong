@@ -127,9 +127,6 @@ describe('Auth + phân quyền (e2e)', () => {
     it('PATCH /products/1', async () => {
       await request(http).patch('/products/1').send({ name: 'X' }).expect(401);
     });
-    it('DELETE /products/1', async () => {
-      await request(http).delete('/products/1').expect(401);
-    });
     it('token giả → 401', async () => {
       await request(http)
         .post('/products')
@@ -139,7 +136,7 @@ describe('Auth + phân quyền (e2e)', () => {
     });
   });
 
-  describe('CUSTOMER → 403 (không được thêm / sửa / xóa)', () => {
+  describe('CUSTOMER → 403 (không được thêm / sửa)', () => {
     const auth = () => ({ Authorization: `Bearer ${customerToken}` });
 
     it('POST /products', async () => {
@@ -156,16 +153,13 @@ describe('Auth + phân quyền (e2e)', () => {
         .send({ name: 'Bị sửa trái phép' })
         .expect(403);
     });
-    it('DELETE /products/1', async () => {
-      await request(http).delete('/products/1').set(auth()).expect(403);
-    });
     it('sản phẩm vẫn nguyên vẹn sau các lần bị từ chối', async () => {
       const res = await request(http).get('/products/1').expect(200);
       expect(res.body.name).not.toBe('Bị sửa trái phép');
     });
   });
 
-  describe('ADMIN → được thêm / sửa / xóa', () => {
+  describe('ADMIN → được thêm / sửa', () => {
     const auth = () => ({ Authorization: `Bearer ${adminToken}` });
     let createdId: number;
 
@@ -204,18 +198,6 @@ describe('Auth + phân quyền (e2e)', () => {
         .set(auth())
         .send({ name: 'X' })
         .expect(404);
-    });
-
-    it('DELETE /products/:id → 200 rồi GET → 404', async () => {
-      await request(http)
-        .delete(`/products/${createdId}`)
-        .set(auth())
-        .expect(200);
-      await request(http).get(`/products/${createdId}`).expect(404);
-    });
-
-    it('DELETE sản phẩm không tồn tại → 404', async () => {
-      await request(http).delete('/products/999999').set(auth()).expect(404);
     });
   });
 

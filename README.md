@@ -78,6 +78,13 @@ Khi chạy bằng npm, áp dụng migration thủ công (chỉ cần làm một 
 cd apps/api && npx prisma migrate deploy
 ```
 
+### 2.4 Thanh toán online SePay (chuyển khoản QR)
+
+Cấu hình trong `.env` (xem `.env.example`): `SEPAY_ACC`, `SEPAY_BANK`, `SEPAY_API_KEY`, `SEPAY_QR_BASE`, `SEPAY_TIMEOUT_SECONDS` (mặc định **120 giây = 2 phút**).
+
+- Trên [my.sepay.vn](https://my.sepay.vn): link tài khoản ngân hàng nhận tiền và tạo webhook trỏ tới `<API_URL>/payments/sepay/webhook`.
+- Luồng: tạo phiên → quét QR chuyển khoản kèm mã `PL…` → SePay gọi webhook khi tiền vào → API tự đối soát mã + số tiền, trừ kho và đánh dấu đơn `PAID`. Quá 2 phút chưa nhận tiền, phiên chuyển `EXPIRED`.
+
 ---
 
 ## 3. Kiểm thử (Test)
@@ -92,7 +99,7 @@ npm run test                          # chạy toàn bộ unit test API
 npm --prefix apps/web run lint        # lint frontend
 ```
 
-Kết quả tham chiếu: **60/60 test pass** (7 test suites: auth, orders, payments, products, rbac, jwt-guard, health).
+Kết quả tham chiếu: **66/66 test pass** (7 test suites: auth, orders, payments, products, rbac, jwt-guard, health).
 
 > Ghi chú: Frontend chưa có unit/E2E test tự động — nằm trong kế hoạch Sprint 2 (Task 5.2: integration test cho tạo đơn/thanh toán và 1 E2E test luồng menu → xác nhận đơn).
 
