@@ -7,12 +7,12 @@ import { User, UserRole } from './entities/user.entity';
  * Khi có PostgreSQL chỉ cần thay phần bên trong, giữ nguyên create / findByEmail / findById.
  *
  * Tài khoản ADMIN mặc định lấy từ prisma/schema.sql của nhóm:
- *   email    : admin@maycha.vn
+ *   email    : admin@phuclong.vn
  *   mật khẩu : Admin@123456
  */
 const DEFAULT_ADMIN = {
   id: '00000000-0000-4000-8000-000000000001',
-  email: 'admin@maycha.vn',
+  email: 'admin@phuclong.vn',
   passwordHash:
     '$2b$10$6QjZRCXeZIk1rYpQaxbQfOZK4p.6T.DVVbWFXSFikJEgA.nMLrP56',
 };

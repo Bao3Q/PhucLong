@@ -64,7 +64,7 @@ describe('Auth + phân quyền (e2e)', () => {
 
     const admin = await request(http)
       .post('/auth/login')
-      .send({ email: 'admin@maycha.vn', password: 'Admin@123456' });
+      .send({ email: 'admin@phuclong.vn', password: 'Admin@123456' });
     adminToken = admin.body.accessToken;
 
     await request(http)
