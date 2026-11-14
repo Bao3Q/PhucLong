@@ -22,18 +22,18 @@ PhucLong/
 └── README.md
 ```
 
-## 3. Chạy môi trường Local
+## 2. Chạy môi trường Local
 
-### 3.1 Chuẩn bị
+### 2.1 Chuẩn bị
 Yêu cầu: **Node.js >= 20**, **Docker Desktop** (nếu chạy bằng Docker).
 
 ```bash
-git clone https://github.com/<org>/PhucLong.git
+git clone https://github.com/Bao3Q/PhucLong.git
 cd PhucLong
 cp .env.example .env
 ```
 
-### 3.2 Cách 1 — Docker Compose (khuyên dùng)
+### 2.2 Cách 1 — Docker Compose (khuyên dùng)
 
 Một lệnh duy nhất, tự khởi tạo database và chạy migration:
 
@@ -49,7 +49,7 @@ docker compose up --build
 
 Container `app` tự động chạy `prisma generate` + `prisma migrate deploy` khi khởi động, nên database luôn được tạo bảng và seed đúng phiên bản migration mới nhất.
 
-### 3.3 Cách 2 — Chạy trực tiếp bằng npm (dev mode, hot-reload)
+### 2.3 Cách 2 — Chạy trực tiếp bằng npm (dev mode, hot-reload)
 
 Cần một PostgreSQL đang chạy. Có hai lựa chọn:
 - PostgreSQL hệ thống trên cổng **5432** (khớp mặc định `DATABASE_URL` trong `.env`).
@@ -80,7 +80,7 @@ cd apps/api && npx prisma migrate deploy
 
 ---
 
-## 4. Kiểm thử (Test)
+## 3. Kiểm thử (Test)
 
 | Lệnh | Nơi chạy | Mô tả |
 | --- | --- | --- |
@@ -92,13 +92,13 @@ npm run test                          # chạy toàn bộ unit test API
 npm --prefix apps/web run lint        # lint frontend
 ```
 
-Kết quả tham chiếu: **58/58 test pass** (6 test suites: auth, orders, payments, products, rbac, jwt-guard).
+Kết quả tham chiếu: **60/60 test pass** (7 test suites: auth, orders, payments, products, rbac, jwt-guard, health).
 
 > Ghi chú: Frontend chưa có unit/E2E test tự động — nằm trong kế hoạch Sprint 2 (Task 5.2: integration test cho tạo đơn/thanh toán và 1 E2E test luồng menu → xác nhận đơn).
 
-## 5. Build
+## 4. Build
 
-### 5.1 Build ứng dụng
+### 4.1 Build ứng dụng
 
 ```bash
 npm run build                         # build cả API + Web song song
@@ -113,21 +113,34 @@ Chạy API ở chế độ production sau khi build:
 cd apps/api && npm run start:prod     # node dist/main
 ```
 
-### 5.2 Build Docker image
+### 4.2 Build Docker image
 
 ```bash
 docker build -t brewlite:local .
 docker run -p 3000:3000 -p 4000:4000 --env-file .env brewlite:local
 ```
 
-> Lưu ý: image hiện tại chạy **chế độ dev** (cả Web + API trong một container, dùng cho demo local). Image production riêng cho API trên Render nằm trong checklist mục 6.5.
+> Lưu ý: image hiện tại chạy **chế độ dev** (cả Web + API trong một container, dùng cho demo local). Image production riêng cho API trên Render nằm trong checklist mục 6.
 
 ---
 
-### 6.5 Checklist cần hoàn thiện trước khi go-live
+## 5. Deploy
+
+| Thành phần | Nền tảng | URL |
+| --- | --- | --- |
+| Web (Next.js) | Vercel | https://phuc-long-omega.vercel.app/ |
+| API (NestJS) | Render (Docker) | https://phuclong-kf14.onrender.com/ |
+| Health check | Render | https://phuclong-kf14.onrender.com/health |
+| PostgreSQL | Neon | — (connection string không public) |
+
+Chi tiết lựa chọn nền tảng: [ADR-004](docs/architecture/adr/004-render-vercel-neon.md).
+
+---
+
+## 6. Checklist cần hoàn thiện trước khi go-live
 
 - [ ] **Dockerfile production cho API**: image hiện tại là dev-mode (`CMD npm run dev` chạy cả Web + API). Cần image chỉ chứa API: build `nest build` rồi `CMD ["node", "dist/main"]`.
-- [ ] **Endpoint `GET /health`** (theo NFR-04): thêm vào API và thay bước smoke test bằng health check này.
+- [x] **Endpoint `GET /health`** (theo NFR-04): đã triển khai — trả 200 `{"status":"ok","database":"up"}` khi DB sẵn sàng, 503 khi DB mất. Smoke test: `curl https://phuclong-kf14.onrender.com/health` (cần redeploy API lên Render để có trên production).
 - [ ] **CD pipeline** (Task 5.3): quality gate → build image tag theo commit SHA → push registry → deploy → health check → tự rollback khi thất bại.
 - [ ] **Secrets** chỉ đặt trong dashboard Render/Vercel/Neon, không commit vào repo, không in ra log CI.
 
@@ -140,7 +153,7 @@ Vercel giữ mọi bản deploy bất biến:
 **Project → Deployments → chọn bản deploy ổn định trước đó → ... → Promote to Production.** Hoàn tất tức thì, không cần build lại.
 
 ### 7.2 API (Render)
-**Service → Deploys → chọn deploy ổn định trước đó → Rollback.** Render quay lại đúng image của bản deploy cũ. Sau rollback, chạy lại smoke test (mục 6.3 bước 5).
+**Service → Deploys → chọn deploy ổn định trước đó → Rollback.** Render quay lại đúng image của bản deploy cũ. Sau rollback, chạy lại smoke test `GET /health`.
 
 ### 7.3 Database (Neon)
 - **Trước mỗi deploy có migration**: tạo snapshot/branch backup trên Neon.
@@ -179,7 +192,7 @@ Nếu một bước thất bại, transaction tự rollback các thay đổi dat
 
 | Hiện tượng | Nguyên nhân & cách xử lý |
 | --- | --- |
-| API báo lỗi kết nối DB (Prisma `P1001`) | Database chưa sẵn sàng hoặc `DATABASE_URL` sai cổng. Chạy bằng npm + compose postgres thì phải dùng cổng **5433** (xem mục 3.3). |
+| API báo lỗi kết nối DB (Prisma `P1001`) | Database chưa sẵn sàng hoặc `DATABASE_URL` sai cổng. Chạy bằng npm + compose postgres thì phải dùng cổng **5433** (xem mục 2.3). |
 | Web gọi API bị lỗi CORS | `CORS_ORIGIN` trên Render chưa trùng domain Vercel (kể cả có/không có `www`). |
 | Web vẫn gọi API localhost sau khi deploy | `NEXT_PUBLIC_API_URL` là biến build-time — đổi env trên Vercel xong phải **Redeploy**. |
 | `docker compose up` báo lỗi `.env.example` không tồn tại | Chạy lệnh từ thư mục root của monorepo, không chạy trong `apps/*`. |
