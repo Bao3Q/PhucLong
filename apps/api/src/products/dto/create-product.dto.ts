@@ -1,25 +1,10 @@
-import { Type } from 'class-transformer';
-import {
-  IsArray,
-  IsInt,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  Min,
-  ValidateNested,
-} from 'class-validator';
+import { IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
 
-/** Size hoặc topping đi kèm sản phẩm (id do server tự gán). */
-export class ProductOptionDto {
-  @IsString()
-  @IsNotEmpty()
-  name: string;
-
-  @IsInt()
-  @Min(0)
-  price: number;
-}
-
+/**
+ * Size/topping không còn do admin tự khai báo: giá tính tiền phía server dựa
+ * trên hằng số chuẩn (SIZE_SURCHARGE, TOPPINGS trong products.data.ts) nên
+ * mọi sản phẩm dùng chung bộ size S/M/L và topping của quán.
+ */
 export class CreateProductDto {
   @IsString()
   @IsNotEmpty()
@@ -45,15 +30,8 @@ export class CreateProductDto {
   @IsOptional()
   tag?: string;
 
-  @IsArray()
+  @IsInt()
+  @Min(0)
   @IsOptional()
-  @ValidateNested({ each: true })
-  @Type(() => ProductOptionDto)
-  sizes?: ProductOptionDto[];
-
-  @IsArray()
-  @IsOptional()
-  @ValidateNested({ each: true })
-  @Type(() => ProductOptionDto)
-  toppings?: ProductOptionDto[];
+  stock?: number;
 }

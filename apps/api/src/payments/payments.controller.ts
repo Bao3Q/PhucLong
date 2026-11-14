@@ -10,10 +10,11 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { PaymentsService } from './payments.service';
-import type { SePayWebhookPayload } from './payments.data';
 import { JwtAuthGuard } from '../common/auth/jwt-auth.guard';
 import type { AuthUser } from '../common/auth/auth-user.interface';
 
+// Webhook SePay đã tách sang sepay-webhook.controller.ts: nó xác thực bằng
+// khóa API (SepayWebhookGuard) chứ không phải JWT như các route bên dưới.
 @Controller('payments')
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
@@ -40,15 +41,15 @@ export class PaymentsController {
     return this.paymentsService.createSePayPayment(orderId, request.user);
   }
 
-  // SePay gọi khi tài khoản nhận tiền có giao dịch. Phải trả HTTP 200 với
-  // body đúng {"success": true}; sai khóa API trả 401 để SePay tự retry.
-  @Post('sepay/webhook')
-  async sePayWebhook(
-    @Headers('authorization') authorization: string | undefined,
-    @Body() payload: SePayWebhookPayload,
+  // Mô phỏng chuyển khoản — chỉ cho demo local (SePay không gọi được localhost),
+  // backend tự chặn khi NODE_ENV=production.
+  @Post('sepay/simulate')
+  @UseGuards(JwtAuthGuard)
+  simulateSePay(
+    @Req() request: Request & { user: AuthUser },
+    @Body('orderId') orderId: string,
   ) {
-    await this.paymentsService.handleWebhook(authorization, payload);
-    return { success: true };
+    return this.paymentsService.simulateSePayPayment(orderId, request.user);
   }
 
   // Tra trạng thái thanh toán — frontend poll mỗi vài giây trong phiên SePay.

@@ -37,4 +37,6 @@ export interface PaymentRecord {
   /** Hạn chót của phiên SePay — frontend dùng để đếm ngược. */
   expiresAt?: string;
   paymentCode?: string;
+  /** URL ảnh QR (lưu trong result để frontend khôi phục đúng phiên cũ). */
+  qrUrl?: string;
 }

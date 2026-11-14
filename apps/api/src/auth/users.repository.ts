@@ -1,12 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { User, UserRole } from './entities/user.entity';
+import { PrismaService } from '../prisma/prisma.service';
 
 /**
- * Kho user lưu trong bộ nhớ (Phúc Long chưa nối database, giống ProductsService).
- * Khi có PostgreSQL chỉ cần thay phần bên trong, giữ nguyên create / findByEmail / findById.
+ * Kho user dùng Prisma/PostgreSQL khi có kết nối, tự chuyển sang lưu trong
+ * bộ nhớ (Map) khi không có PrismaService (unit test, NODE_ENV=test).
+ * Interface create / findByEmail / findById giữ nguyên cho cả hai nhánh.
  *
- * Tài khoản ADMIN mặc định lấy từ prisma/schema.sql của nhóm:
+ * Tài khoản ADMIN mặc định cho nhánh in-memory (DB được seed bằng migration
+ * `seed_admin_user`):
  *   email    : admin@phuclong.vn
  *   mật khẩu : Admin@123456
  */
@@ -22,8 +25,13 @@ export class UsersRepository {
   private readonly users = new Map<string, User>();
   private readonly emailIndex = new Map<string, string>();
 
-  constructor() {
-    this.seedAdmin();
+  constructor(
+    @Optional() @Inject(PrismaService) private readonly prisma?: PrismaService | null,
+  ) {
+    // Chỉ seed admin trong bộ nhớ khi không có DB (test/demo không cần PostgreSQL).
+    if (!this.prisma) {
+      this.seedAdmin();
+    }
   }
 
   private seedAdmin(): void {
@@ -43,6 +51,24 @@ export class UsersRepository {
     role: UserRole = 'CUSTOMER',
   ): Promise<User | undefined> {
     const key = email.toLowerCase();
+    if (this.prisma) {
+      try {
+        return await this.prisma.user.create({
+          data: { email: key, passwordHash, role },
+        });
+      } catch (error) {
+        // Trùng email (unique constraint) → báo về như nhánh in-memory.
+        if (
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          error.code === 'P2002'
+        ) {
+          return undefined;
+        }
+        throw error;
+      }
+    }
     if (this.emailIndex.has(key)) return undefined;
 
     const user: User = {
@@ -59,12 +85,20 @@ export class UsersRepository {
   }
 
   async findByEmail(email: string): Promise<User | undefined> {
+    if (this.prisma) {
+      return (await this.prisma.user.findUnique({
+        where: { email: email.toLowerCase() },
+      })) ?? undefined;
+    }
     const id = this.emailIndex.get(email.toLowerCase());
     const user = id ? this.users.get(id) : undefined;
     return user ? { ...user } : undefined;
   }
 
   async findById(id: string): Promise<User | undefined> {
+    if (this.prisma) {
+      return (await this.prisma.user.findUnique({ where: { id } })) ?? undefined;
+    }
     const user = this.users.get(id);
     return user ? { ...user } : undefined;
   }

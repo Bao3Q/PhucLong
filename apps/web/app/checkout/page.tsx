@@ -7,6 +7,9 @@ import { clearToken, getToken } from '@/lib/auth';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
+/** Đơn hàng đang có phiên SePay chờ thanh toán — để quay lại /checkout còn khôi phục đúng phiên. */
+const PENDING_ORDER_KEY = 'phuclong_pending_order';
+
 type PaymentMethod = 'momo' | 'card' | 'sepay';
 type PayStatus = 'waiting' | 'expired' | 'failed';
 
@@ -44,6 +47,53 @@ export default function CheckoutPage() {
         console.error(e);
       }
     }
+
+    // Quay lại /checkout khi còn phiên SePay đang chờ → khôi phục đúng phiên cũ
+    // (giỏ đã được dọn ngay khi tạo đơn, nên khôi phục dựa trên marker + API).
+    const pendingOrderId = localStorage.getItem(PENDING_ORDER_KEY);
+    const token = getToken();
+    if (!pendingOrderId || !token) return;
+
+    fetch(`${API_BASE_URL}/payments/${pendingOrderId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (res) => {
+        if (res.status === 401) {
+          clearToken();
+          router.push('/login?next=/checkout');
+          return null;
+        }
+        return res.ok ? res.json() : null;
+      })
+      .then((data) => {
+        if (!data) return;
+        if (data.status === 'PAID') {
+          localStorage.removeItem(PENDING_ORDER_KEY);
+          router.push(`/order-success?orderId=${data.orderId}&transId=${data.transactionId}`);
+        } else if (
+          data.status === 'PENDING' &&
+          data.qrUrl &&
+          new Date(data.expiresAt).getTime() > Date.now()
+        ) {
+          setSession({
+            orderId: data.orderId,
+            paymentCode: data.paymentCode,
+            qrUrl: data.qrUrl,
+            amount: data.amount,
+            expiresAt: data.expiresAt,
+          });
+          setPayStatus('waiting');
+        } else {
+          // EXPIRED / FAILED / không còn phiên hợp lệ → về form trống giỏ
+          localStorage.removeItem(PENDING_ORDER_KEY);
+        }
+      })
+      .catch(() => {
+        localStorage.removeItem(PENDING_ORDER_KEY);
+      });
+    // Chạy đúng một lần lúc mount: session luôn null lúc này, và không được
+    // re-run khi người dùng chủ động bấm "chọn lại phương thức" (session về null).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Đếm ngược từ hạn chót do server trả (expiresAt) + poll trạng thái mỗi 3 giây.
@@ -69,12 +119,21 @@ export default function CheckoutPage() {
       fetch(`${API_BASE_URL}/payments/${session.orderId}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
-        .then((res) => (res.ok ? res.json() : null))
+        .then(async (res) => {
+          if (res.status === 401) {
+            // Token hết hạn giữa phiên → đăng nhập lại rồi quay tiếp /checkout.
+            stopped = true;
+            clearToken();
+            router.push('/login?next=/checkout');
+            return null;
+          }
+          return res.ok ? res.json() : null;
+        })
         .then((data) => {
           if (stopped || !data) return;
           if (data.status === 'PAID') {
             stopped = true;
-            localStorage.removeItem('phuclong_cart');
+            localStorage.removeItem(PENDING_ORDER_KEY);
             router.push(
               `/order-success?orderId=${data.orderId}&transId=${data.transactionId}`,
             );
@@ -104,15 +163,14 @@ export default function CheckoutPage() {
   };
 
   async function createOrder(token: string) {
+    // Client KHÔNG gửi giá: server tra bảng giá và tự tính unitPrice/total.
     const orderPayload = {
       items: cart.map((item) => ({
         productId: item.product.id,
-        productName: item.product.name,
         size: item.size,
-        quantity: item.quantity,
-        unitPrice: item.totalPrice / item.quantity,
+        qty: item.quantity,
         toppings: (item.toppings ?? []).map((topping) => topping.name),
-        note: item.note,
+        note: item.note || undefined,
       })),
     };
 
@@ -174,11 +232,18 @@ export default function CheckoutPage() {
       const orderData = await createOrder(token);
       if (!orderData) return;
 
+      // Giỏ đã được chốt vào đơn → dọn giỏ NGAY LÚC NÀY, đỡ đợi payment.
+      // Từ đây mọi hiển thị (QR, số tiền, retry) dựa trên đơn + phiên SePay,
+      // không dựa vào giỏ nữa → không còn "giỏ hàng cũ" tồn đọng.
+      localStorage.removeItem('phuclong_cart');
+      setCart([]);
+
       if (paymentMethod === 'sepay') {
         // Thanh toán online SePay: tạo phiên QR rồi sang màn hình chờ,
         // đơn chỉ PAID khi webhook SePay xác nhận tiền đã vào tài khoản.
         const sessionData = await createSePaySession(orderData.id, token);
         if (!sessionData) return;
+        localStorage.setItem(PENDING_ORDER_KEY, String(sessionData.orderId));
         setSession(sessionData);
         setPayStatus('waiting');
         return;
@@ -205,7 +270,6 @@ export default function CheckoutPage() {
 
       const payData = await payRes.json();
 
-      localStorage.removeItem('phuclong_cart');
       router.push(`/order-success?orderId=${orderData.id}&transId=${payData.transactionId}`);
     } catch (err: unknown) {
       console.error('Payment error:', err);
@@ -225,10 +289,45 @@ export default function CheckoutPage() {
     try {
       const sessionData = await createSePaySession(session.orderId, token);
       if (!sessionData) return;
+      localStorage.setItem(PENDING_ORDER_KEY, String(sessionData.orderId));
       setSession(sessionData);
       setPayStatus('waiting');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Không tạo lại được phiên thanh toán.';
+      setErrorMessage(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Demo local: giả lập SePay báo "tiền đã vào tài khoản" — SePay không gọi
+  // được localhost, nên khi chạy dev cần nút này để thấy luồng PAID đầy đủ.
+  // Backend tự chặn endpoint này khi NODE_ENV=production.
+  const handleSimulateTransfer = async () => {
+    if (!session) return;
+    const token = getToken();
+    if (!token) {
+      router.push('/login?next=/checkout');
+      return;
+    }
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/payments/sepay/simulate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ orderId: session.orderId }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message || `Mô phỏng thất bại (${res.status})`);
+      }
+      // Poll 3 giây/lần sẽ bắt được PAID và chuyển sang trang thành công.
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Mô phỏng chuyển khoản thất bại.';
       setErrorMessage(msg);
     } finally {
       setIsSubmitting(false);
@@ -270,6 +369,12 @@ export default function CheckoutPage() {
               />
             </div>
 
+            {errorMessage && (
+              <p role="alert" className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-xs text-red-700">
+                ⚠️ {errorMessage}
+              </p>
+            )}
+
             <div className="space-y-1">
               <p className="text-xs text-gray-400">Số tiền</p>
               <p className="text-2xl font-extrabold text-[#006A32]">
@@ -291,6 +396,15 @@ export default function CheckoutPage() {
                 <p className="text-[11px] text-gray-400">
                   Sau 2 phút không thanh toán, phiên sẽ hết hạn và bạn có thể tạo lại mã QR.
                 </p>
+                {process.env.NODE_ENV === 'development' && (
+                  <button
+                    onClick={handleSimulateTransfer}
+                    disabled={isSubmitting}
+                    className="text-xs font-bold text-[#006A32] border border-[#006A32]/30 bg-[#006A32]/5 hover:bg-[#006A32]/10 rounded-full px-4 py-2 transition disabled:opacity-60"
+                  >
+                    ⚡ Mô phỏng chuyển khoản (demo local)
+                  </button>
+                )}
               </div>
             )}
 

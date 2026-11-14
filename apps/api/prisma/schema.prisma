@@ -57,6 +57,7 @@ model User {
 model Product {
   id          String  @id @default(cuid())
   name        String
+  category    String  @default("Khác")
   price       Int
   imageUrl    String
   description String?
@@ -158,6 +159,10 @@ model Payment {
 
   user  User  @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   order Order @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  // Idempotency chặt: mỗi user chỉ được dùng một key cho một kết quả thanh toán
+  // (chặn race khi hai request cùng key chạm đồng thời).
+  @@unique([userId, idempotencyKey])
 }
 
 model LoyaltyTransaction {

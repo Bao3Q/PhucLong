@@ -3,7 +3,6 @@ import {
   Controller,
   Get,
   Param,
-  ParseIntPipe,
   Patch,
   Post,
   Query,
@@ -29,7 +28,7 @@ export class ProductsController {
 
   // Ai cũng được xem chi tiết
   @Get(':id')
-  async getById(@Param('id', ParseIntPipe) id: number): Promise<Product> {
+  async getById(@Param('id') id: string): Promise<Product> {
     return this.productsService.findOne(id);
   }
 
@@ -45,10 +44,7 @@ export class ProductsController {
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
-  update(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: UpdateProductDto,
-  ): Promise<Product> {
+  update(@Param('id') id: string, @Body() dto: UpdateProductDto): Promise<Product> {
     return this.productsService.update(id, dto);
   }
 }
