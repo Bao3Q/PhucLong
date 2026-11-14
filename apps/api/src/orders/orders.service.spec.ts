@@ -4,8 +4,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
+import { OrdersRepository } from './orders.repository';
+import { ProductsService } from '../products/products.service';
 import type { AuthUser } from '../common/auth/auth-user.interface';
-import type { PrismaService } from '../prisma/prisma.service';
+import { OrderStatus } from './entities/order.entity';
+import { CreateOrderDto, CreateOrderItemDto, OrderSize } from './dto/create-order.dto';
 
 const user: AuthUser = {
   id: 'test-user-id',
@@ -13,96 +16,145 @@ const user: AuthUser = {
   role: 'CUSTOMER',
 };
 
-const storedOrder = {
-  id: 1,
-  userId: user.id,
-  total: 100000,
-  status: 'PENDING',
-  createdAt: new Date('2026-01-01T00:00:00.000Z'),
-  items: [
-    {
-      productId: '1',
-      productName: 'Trà Sữa Phúc Long',
-      size: 'M',
-      toppings: [],
-      note: null,
-      qty: 2,
-      unitPrice: 50000,
-    },
-  ],
-};
-
-describe('OrdersService', () => {
+describe('OrdersService (nhánh in-memory, không cần DB)', () => {
   let service: OrdersService;
-  const prisma = {
-    order: {
-      create: jest.fn(),
-      findUnique: jest.fn(),
-      update: jest.fn(),
-    },
-  };
+  let products: ProductsService;
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    service = new OrdersService(prisma as unknown as PrismaService);
+    products = new ProductsService();
+    service = new OrdersService(new OrdersRepository(), products);
   });
 
-  it('persists an order and its items through Prisma', async () => {
-    prisma.order.create.mockResolvedValue(storedOrder);
+  const item: CreateOrderItemDto = {
+    productId: '1',
+    size: OrderSize.M,
+    qty: 2,
+    toppings: ['Shot Espresso thêm'],
+  };
 
-    const order = await service.createOrder(user, [
-      {
-        productId: 1,
-        productName: 'Trà Sữa Phúc Long',
-        size: 'M',
-        quantity: 2,
-        unitPrice: 50000,
-      },
-    ]);
+  it('tạo đơn với giá tính trên server và trừ tồn kho', async () => {
+    // Product 1: Cappuccino Espresso 45000 + size M 5000 + topping 15000 = 65000
+    const order = await service.createOrder(user, { items: [item] });
 
-    expect(prisma.order.create).toHaveBeenCalledTimes(1);
-    expect(order).toMatchObject({
-      id: 1,
-      userId: user.id,
-      totalAmount: 100000,
-      status: 'PENDING_PAYMENT',
+    expect(order.status).toBe(OrderStatus.PENDING);
+    expect(order.total).toBe(130000);
+    expect(order.items[0]).toMatchObject({
+      productId: '1',
+      productName: 'Cappuccino Espresso',
+      size: 'M',
+      unitPrice: 65000,
+      lineTotal: 130000,
+      toppings: ['Shot Espresso thêm'],
+    });
+    expect((await products.findOneFromStorage('1'))?.stock).toBe(48);
+  });
+
+  it('giỏ trống → 400', async () => {
+    await expect(
+      service.createOrder(user, { items: [] }),
+    ).rejects.toThrow(BadRequestException);
+    expect((await products.findOneFromStorage('1'))?.stock).toBe(50);
+  });
+
+  it('topping lạ hoặc trùng → 400, không trừ stock', async () => {
+    await expect(
+      service.createOrder(user, {
+        items: [{ ...item, toppings: ['Trân châu'] }],
+      }),
+    ).rejects.toThrow(BadRequestException);
+    await expect(
+      service.createOrder(user, {
+        items: [{ ...item, toppings: ['Shot Espresso thêm', 'Shot Espresso thêm'] }],
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect((await products.findOneFromStorage('1'))?.stock).toBe(50);
+  });
+
+  it('sản phẩm không tồn tại → 404', async () => {
+    await expect(
+      service.createOrder(user, { items: [{ ...item, productId: '9999' }] }),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  describe('quyền xem đơn', () => {
+    it('chủ đơn được xem đơn của mình', async () => {
+      const order = await service.createOrder(user, { items: [item] });
+      await expect(service.findOne(order.id, user)).resolves.toMatchObject({
+        id: order.id,
+      });
+    });
+
+    it('user khác xem đơn của người khác → Forbidden', async () => {
+      const order = await service.createOrder(user, { items: [item] });
+      const stranger: AuthUser = { id: 'other-user-id', role: 'CUSTOMER' };
+      await expect(service.findOne(order.id, stranger)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('ADMIN được xem đơn của bất kỳ ai', async () => {
+      const order = await service.createOrder(user, { items: [item] });
+      const admin: AuthUser = { id: 'admin-id', role: 'ADMIN' };
+      await expect(service.findOne(order.id, admin)).resolves.toMatchObject({
+        id: order.id,
+      });
+    });
+
+    it('đơn không tồn tại → 404', async () => {
+      await expect(service.findOne(999, user)).rejects.toThrow(NotFoundException);
     });
   });
 
-  it('rejects an empty order before writing to the database', async () => {
-    await expect(service.createOrder(user, [])).rejects.toThrow(BadRequestException);
-    expect(prisma.order.create).not.toHaveBeenCalled();
-  });
-
-  it('loads an order from Prisma', async () => {
-    prisma.order.findUnique.mockResolvedValue(storedOrder);
-
-    await expect(service.findOne(1)).resolves.toMatchObject({ id: 1 });
-    expect(prisma.order.findUnique).toHaveBeenCalledWith({
-      where: { id: 1 },
-      include: { items: true },
+  describe('lịch sử đơn', () => {
+    it('GET /orders/me trả đơn mới nhất trước', async () => {
+      await service.createOrder(user, { items: [{ ...item, qty: 1 }] });
+      await service.createOrder(user, { items: [{ ...item, qty: 1 }] });
+      const orders = await service.findMyOrders(user.id);
+      expect(orders).toHaveLength(2);
+      expect(orders[0].id).toBeGreaterThan(orders[1].id);
     });
   });
 
-  it('throws when the requested order does not exist', async () => {
-    prisma.order.findUnique.mockResolvedValue(null);
-    await expect(service.findOne(999)).rejects.toThrow(NotFoundException);
-  });
+  describe('máy trạng thái', () => {
+    it('chặn bước bị bỏ qua và đi được hết luồng chính', async () => {
+      const order = await service.createOrder(user, { items: [item] });
+      await expect(
+        service.updateOrderStatus(user, order.id, OrderStatus.READY),
+      ).rejects.toThrow(BadRequestException);
+      for (const status of [
+        OrderStatus.PAID,
+        OrderStatus.PREPARING,
+        OrderStatus.READY,
+        OrderStatus.COMPLETED,
+      ]) {
+        expect(
+          (await service.updateOrderStatus(user, order.id, status)).status,
+        ).toBe(status);
+      }
+      // COMPLETED là trạng thái kết thúc
+      await expect(
+        service.updateOrderStatus(user, order.id, OrderStatus.CANCELLED),
+      ).rejects.toThrow(BadRequestException);
+    });
 
-  it('chủ đơn được xem đơn của mình', async () => {
-    prisma.order.findUnique.mockResolvedValue(storedOrder);
-    await expect(service.findOne(1, user)).resolves.toMatchObject({ id: 1 });
-  });
+    it('hủy đơn hoàn lại tồn kho', async () => {
+      const order = await service.createOrder(user, { items: [item] });
+      expect((await products.findOneFromStorage('1'))?.stock).toBe(48);
+      const cancelled = await service.updateOrderStatus(
+        user,
+        order.id,
+        OrderStatus.CANCELLED,
+      );
+      expect(cancelled.status).toBe(OrderStatus.CANCELLED);
+      expect((await products.findOneFromStorage('1'))?.stock).toBe(50);
+    });
 
-  it('user khác xem đơn của người khác → Forbidden', async () => {
-    prisma.order.findUnique.mockResolvedValue(storedOrder);
-    const stranger: AuthUser = { id: 'other-user-id', role: 'CUSTOMER' };
-    await expect(service.findOne(1, stranger)).rejects.toThrow(ForbiddenException);
-  });
-
-  it('ADMIN được xem đơn của bất kỳ ai', async () => {
-    prisma.order.findUnique.mockResolvedValue(storedOrder);
-    const admin: AuthUser = { id: 'admin-id', role: 'ADMIN' };
-    await expect(service.findOne(1, admin)).resolves.toMatchObject({ id: 1 });
+    it('người lạ không được chuyển trạng thái đơn của người khác', async () => {
+      const order = await service.createOrder(user, { items: [item] });
+      const stranger: AuthUser = { id: 'other-user-id', role: 'CUSTOMER' };
+      await expect(
+        service.updateOrderStatus(stranger, order.id, OrderStatus.CANCELLED),
+      ).rejects.toThrow(ForbiddenException);
+    });
   });
 });

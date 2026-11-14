@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import ProductModal from '@/components/ProductModal';
 import AuthButton from '@/components/AuthButton';
+import { clearToken, getToken } from '@/lib/auth';
 import { Product, CartItem } from '@/app/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -56,12 +57,38 @@ export default function Home() {
         console.error(e);
       }
     }
+
+    // Đơn SePay đã PAID khi đang ở trang khác → dọn marker tại đây (giỏ đã
+    // được dọn ngay khi tạo đơn, đây chỉ là bước dọn rác marker còn sót).
+    const pendingOrderId = localStorage.getItem('phuclong_pending_order');
+    const token = getToken();
+    if (!pendingOrderId || !token) return;
+
+    fetch(`${API_BASE_URL}/payments/${pendingOrderId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (res) => {
+        if (res.status === 401) {
+          clearToken();
+          return null;
+        }
+        return res.ok ? res.json() : null;
+      })
+      .then((data) => {
+        if (data?.status === 'PAID') {
+          localStorage.removeItem('phuclong_pending_order');
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const handleAddToCart = (newItem: CartItem) => {
     const updatedCart = [...cart, newItem];
     setCart(updatedCart);
     localStorage.setItem('phuclong_cart', JSON.stringify(updatedCart));
+    // Thêm món mới = bắt đầu ý định mua mới → bỏ marker phiên SePay cũ
+    // (nếu còn) để checkout không kéo người dùng về phiên thanh toán đã bỏ.
+    localStorage.removeItem('phuclong_pending_order');
     router.push('/checkout');
   };
 

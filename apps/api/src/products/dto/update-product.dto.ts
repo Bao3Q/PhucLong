@@ -1,14 +1,4 @@
-import { Type } from 'class-transformer';
-import {
-  IsArray,
-  IsInt,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  Min,
-  ValidateNested,
-} from 'class-validator';
-import { ProductOptionDto } from './create-product.dto';
+import { IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
 
 /** Mọi field đều tùy chọn: chỉ gửi những gì cần sửa (PATCH). */
 export class UpdateProductDto {
@@ -41,14 +31,7 @@ export class UpdateProductDto {
   tag?: string;
 
   @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => ProductOptionDto)
-  sizes?: ProductOptionDto[];
-
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => ProductOptionDto)
-  toppings?: ProductOptionDto[];
+  @IsInt()
+  @Min(0)
+  stock?: number;
 }

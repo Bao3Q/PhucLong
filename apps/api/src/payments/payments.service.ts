@@ -1,14 +1,14 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
-  NotFoundException,
-  UnauthorizedException,
+  Optional,
 } from '@nestjs/common';
-import { randomBytes, timingSafeEqual } from 'crypto';
+import { randomBytes } from 'crypto';
 import { Prisma, ProductSize } from '../generated/prisma/client';
 import { OrdersService } from '../orders/orders.service';
-import { Order } from '../orders/orders.data';
+import { Order, OrderStatus } from '../orders/entities/order.entity';
 import type { AuthUser } from '../common/auth/auth-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -20,13 +20,6 @@ import {
 /** Hạn chót của phiên thanh toán SePay (giây) — đề bài yêu cầu 2 phút. */
 const SEPAY_TIMEOUT_SECONDS = Number(process.env.SEPAY_TIMEOUT_SECONDS || 120);
 
-/** So sánh Authorization header với khóa webhook mà không rò rỉ thời gian. */
-function authKeyMatches(header: string, expected: string): boolean {
-  const a = Buffer.from(header);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 /** result là Json của Prisma — luôn đưa về object để ghi đè an toàn. */
 function asRecord(result: unknown): Record<string, unknown> {
   return typeof result === 'object' && result !== null
@@ -34,11 +27,21 @@ function asRecord(result: unknown): Record<string, unknown> {
     : {};
 }
 
+/** Nhận diện lỗi unique constraint của Prisma (trùng khóa idempotency). */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: string }).code === 'P2002'
+  );
+}
+
 @Injectable()
 export class PaymentsService {
   constructor(
     private readonly ordersService: OrdersService,
-    private readonly prisma: PrismaService,
+    @Optional() @Inject(PrismaService) private readonly prisma?: PrismaService | null,
   ) {}
 
   async processPayment(
@@ -46,49 +49,81 @@ export class PaymentsService {
     method: 'momo' | 'card',
     idempotencyKey?: string,
   ): Promise<PaymentRecord> {
+    const order = await this.ordersService.findOne(orderId);
 
+    // Vân tay nội dung: cùng key nhưng khác nội dung (đơn/method) là bị cấm.
+    const requestFingerprint = `${order.id}:${method || 'card'}`;
+
+    // Replay phải đứng TRƯỚC mọi chặn nghiệp vụ: client retry sau timeout
+    // (khi đơn đã PAID) vẫn phải nhận lại kết quả đã lưu chứ không phải lỗi.
     if (idempotencyKey) {
       const existing = await this.prisma.payment.findFirst({
-        where: { idempotencyKey },
+        where: { userId: order.userId, idempotencyKey },
         orderBy: { createdAt: 'desc' },
       });
       if (existing) {
-        return this.toPaymentRecord(existing);
+        if (existing.requestFingerprint !== requestFingerprint) {
+          throw new BadRequestException(
+            'Idempotency-Key đã được dùng cho một yêu cầu khác, vui lòng dùng khóa mới.',
+          );
+        }
+        return this.toPaymentRecord(existing); // replay kết quả đã lưu
       }
     }
 
-
-    const order = await this.ordersService.findOne(orderId);
-
-    if (order.status === 'PAID') {
+    if (order.status === OrderStatus.PAID) {
       throw new BadRequestException('Đơn hàng này đã được thanh toán trước đó.');
     }
 
-
     const transactionId = `TXN-${(method || 'CARD').toUpperCase()}-${Date.now().toString().slice(-6)}`;
 
-    // Trừ kho + đổi trạng thái đơn + ghi nhận thanh toán trong một transaction:
-    // thiếu nguyên liệu/ly ở bất kỳ bước nào thì tất cả được rollback.
-    const payment = await this.prisma.$transaction(async (tx) => {
-      await this.deductInventory(tx, order);
+    let payment;
+    try {
+      // Trừ kho + đổi trạng thái đơn + ghi nhận thanh toán trong một transaction:
+      // thiếu nguyên liệu/ly ở bất kỳ bước nào thì tất cả được rollback.
+      payment = await this.prisma.$transaction(async (tx) => {
+        await this.deductInventory(tx, order);
 
-      const paidOrder = await this.ordersService.updateStatus(order.id, 'PAID', tx);
+        const paidOrder = await this.ordersService.updateStatus(
+          order.id,
+          OrderStatus.PAID,
+          tx,
+        );
 
-      return tx.payment.create({
-        data: {
-          userId: paidOrder.userId,
-          orderId: paidOrder.id,
-          method: method || 'card',
-          success: true,
-          idempotencyKey,
-          requestFingerprint: `${paidOrder.id}:${method || 'card'}`,
-          result: { transactionId, status: 'SUCCEEDED' },
-          amount: paidOrder.totalAmount,
-          status: 'PAID',
-          paidAt: new Date(),
-        },
+        return tx.payment.create({
+          data: {
+            userId: paidOrder.userId,
+            orderId: paidOrder.id,
+            method: method || 'card',
+            success: true,
+            idempotencyKey,
+            requestFingerprint,
+            result: { transactionId, status: 'SUCCEEDED' },
+            amount: paidOrder.total,
+            status: 'PAID',
+            paidAt: new Date(),
+          },
+        });
       });
-    });
+    } catch (error) {
+      // Hai request dùng chung key chạm vạch đua: unique (userId, idempotencyKey)
+      // chặn bên thứ hai — replay kết quả của bên đã ghi thay vì lỗi 500.
+      if (idempotencyKey && isUniqueViolation(error)) {
+        const winner = await this.prisma.payment.findFirst({
+          where: { userId: order.userId, idempotencyKey },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (winner) {
+          if (winner.requestFingerprint !== requestFingerprint) {
+            throw new BadRequestException(
+              'Idempotency-Key đã được dùng cho một yêu cầu khác, vui lòng dùng khóa mới.',
+            );
+          }
+          return this.toPaymentRecord(winner);
+        }
+      }
+      throw error;
+    }
 
     return this.toPaymentRecord(payment);
   }
@@ -109,12 +144,12 @@ export class PaymentsService {
       const key = `${item.productId}:${item.size}`;
       const existing = needs.get(key);
       if (existing) {
-        existing.qty += item.quantity;
+        existing.qty += item.qty;
       } else {
         needs.set(key, {
-          productId: String(item.productId),
-          size: item.size as ProductSize,
-          qty: item.quantity,
+          productId: item.productId,
+          size: item.size,
+          qty: item.qty,
         });
       }
     }
@@ -166,7 +201,7 @@ export class PaymentsService {
     }
 
     const order = await this.ordersService.findOne(orderId, user);
-    if (order.status === 'PAID') {
+    if (order.status === OrderStatus.PAID) {
       throw new BadRequestException('Đơn hàng này đã được thanh toán trước đó.');
     }
 
@@ -175,6 +210,11 @@ export class PaymentsService {
     const paymentCode = `PL${randomBytes(5).toString('hex').toUpperCase()}`;
     const expiresAt = new Date(Date.now() + SEPAY_TIMEOUT_SECONDS * 1000);
 
+    const qrBase = process.env.SEPAY_QR_BASE || 'https://vietqr.app/img';
+    const qrUrl =
+      `${qrBase}?acc=${encodeURIComponent(acc)}&bank=${encodeURIComponent(bank)}` +
+      `&amount=${order.total}&des=${paymentCode}`;
+
     await this.prisma.payment.create({
       data: {
         userId: order.userId,
@@ -182,43 +222,29 @@ export class PaymentsService {
         method: 'sepay',
         success: false,
         requestFingerprint: `sepay:${order.id}:${paymentCode}`,
-        result: { status: 'PENDING', paymentCode },
-        amount: order.totalAmount,
+        result: { status: 'PENDING', paymentCode, qrUrl },
+        amount: order.total,
         status: 'PENDING',
         paymentCode,
         expiresAt,
       },
     });
 
-    const qrBase = process.env.SEPAY_QR_BASE || 'https://vietqr.app/img';
-    const qrUrl =
-      `${qrBase}?acc=${encodeURIComponent(acc)}&bank=${encodeURIComponent(bank)}` +
-      `&amount=${order.totalAmount}&des=${paymentCode}`;
-
     return {
       orderId: order.id,
       paymentCode,
       qrUrl,
-      amount: order.totalAmount,
+      amount: order.total,
       expiresAt: expiresAt.toISOString(),
     };
   }
 
   /**
-   * Webhook SePay gọi khi tài khoản nhận tiền có biến động.
-   * Điều kiện response: HTTP 200 + body {"success": true} trong 30s,
-   * nên mọi nhánh nghiệp vụ đều trả success:true, chỉ sai khóa API mới 401
-   * (SePay sẽ tự retry nếu nhận khác).
+   * Webhook SePay gọi khi tài khoản nhận tiền có biến động (auth đã được
+   * SepayWebhookGuard kiểm tra bằng khóa API). Điều kiện response: HTTP 200 +
+   * body {"success": true}, nên mọi nhánh nghiệp vụ đều trả success:true.
    */
-  async handleWebhook(
-    authHeader: string | undefined,
-    payload: SePayWebhookPayload,
-  ): Promise<{ success: true }> {
-    const apiKey = process.env.SEPAY_API_KEY;
-    if (!apiKey || !authHeader || !authKeyMatches(authHeader, `Apikey ${apiKey}`)) {
-      throw new UnauthorizedException('Webhook SePay: khóa API không hợp lệ');
-    }
-
+  async handleWebhook(payload: SePayWebhookPayload): Promise<{ success: true }> {
     // Chỉ quan tâm tiền VÀO tài khoản.
     if (payload.transferType !== 'in') {
       return { success: true };
@@ -281,7 +307,7 @@ export class PaymentsService {
         }
 
         const order = await this.ordersService.findOne(payment.orderId);
-        if (order.status === 'PAID') {
+        if (order.status === OrderStatus.PAID) {
           // Đơn đã được trả bằng luồng khác (momo/card) — không hoàn tất lại.
           await tx.payment.update({
             where: { id: payment.id },
@@ -293,7 +319,7 @@ export class PaymentsService {
         // Trừ kho + đổi trạng thái đơn trong cùng transaction với claim:
         // hết nguyên liệu/ly thì toàn bộ rollback, phiên vẫn PENDING.
         await this.deductInventory(tx, order);
-        await this.ordersService.updateStatus(order.id, 'PAID', tx);
+        await this.ordersService.updateStatus(order.id, OrderStatus.PAID, tx);
       });
     } catch (error) {
       // Tiền đã vào nhưng không fulfill được → đánh dấu FAILED để tránh retry vô ích.
@@ -312,6 +338,41 @@ export class PaymentsService {
     const raw = `${payload.code ?? ''} ${payload.content ?? ''}`.toUpperCase();
     const match = raw.match(/PL[0-9A-F]{10}/);
     return match ? match[0] : null;
+  }
+
+  /**
+   * Chỉ dành cho demo local: giả lập một giao dịch chuyển khoản thành công
+   * cho phiên PENDING mới nhất của đơn (SePay không gọi được localhost).
+   * Đi trọn vẹn qua handleWebhook nên hết hạn/thiếu tiền vẫn bị chặn như thật.
+   */
+  async simulateSePayPayment(
+    orderId: string | number,
+    user?: AuthUser,
+  ): Promise<{ success: true }> {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException(
+        'Chức năng mô phỏng chỉ dùng cho môi trường demo local.',
+      );
+    }
+
+    const order = await this.ordersService.findOne(orderId, user);
+    const payment = await this.prisma.payment.findFirst({
+      where: { orderId: order.id, method: 'sepay', status: 'PENDING' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!payment || !payment.paymentCode) {
+      throw new BadRequestException(
+        'Đơn hàng không có phiên thanh toán SePay nào đang chờ.',
+      );
+    }
+
+    return this.handleWebhook({
+      id: Date.now(),
+      code: payment.paymentCode,
+      transferType: 'in',
+      transferAmount: payment.amount,
+      referenceCode: `SIM-${Date.now()}`,
+    });
   }
 
   async getByOrderId(
@@ -361,7 +422,10 @@ export class PaymentsService {
     expiresAt?: Date | null;
     paymentCode?: string | null;
   }): PaymentRecord {
-    const result = (payment.result ?? {}) as { transactionId?: string };
+    const result = (payment.result ?? {}) as {
+      transactionId?: string;
+      qrUrl?: string;
+    };
     const status = (payment.status as PaymentRecord['status']) ??
       (payment.success ? 'PAID' : 'FAILED');
     return {
@@ -375,6 +439,7 @@ export class PaymentsService {
       createdAt: payment.createdAt.toISOString(),
       expiresAt: payment.expiresAt?.toISOString() ?? undefined,
       paymentCode: payment.paymentCode ?? undefined,
+      qrUrl: typeof result.qrUrl === 'string' ? result.qrUrl : undefined,
     };
   }
 }

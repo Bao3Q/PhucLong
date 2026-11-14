@@ -1,30 +1,40 @@
 import {
   BadRequestException,
+  ForbiddenException,
   NotFoundException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import type { OrdersService } from '../orders/orders.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import { Order, OrderStatus } from '../orders/entities/order.entity';
 
-const pendingOrder = {
+const now = new Date('2026-01-01T00:00:00.000Z');
+
+const pendingOrder: Order = {
   id: 1,
   userId: 'test-user-id',
-  totalAmount: 100000,
-  status: 'PENDING_PAYMENT' as const,
-  createdAt: new Date().toISOString(),
+  status: OrderStatus.PENDING,
+  subtotal: 100000,
+  discountAmount: 0,
+  total: 100000,
+  createdAt: now,
+  updatedAt: now,
   items: [],
 };
 
-const orderWithItems = {
+const orderWithItems: Order = {
   ...pendingOrder,
   items: [
     {
-      productId: 3,
+      id: 1,
+      orderId: 1,
+      productId: '3',
       productName: 'Cà Phê Sữa Đá',
-      size: 'M' as const,
-      quantity: 2,
+      size: 'M',
+      toppings: [],
+      qty: 2,
       unitPrice: 40000,
+      lineTotal: 80000,
     },
   ],
 };
@@ -32,13 +42,15 @@ const orderWithItems = {
 const storedPayment = {
   id: 1,
   orderId: 1,
+  userId: 'test-user-id',
   method: 'momo',
   success: true,
   status: 'PAID',
   amount: 100000,
+  requestFingerprint: '1:momo',
   result: { transactionId: 'TXN-MOMO-123456' },
   idempotencyKey: 'idem-1',
-  createdAt: new Date('2026-01-01T00:00:00.000Z'),
+  createdAt: now,
 };
 
 describe('PaymentsService', () => {
@@ -68,7 +80,10 @@ describe('PaymentsService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     orders.findOne.mockResolvedValue(pendingOrder);
-    orders.updateStatus.mockResolvedValue({ ...pendingOrder, status: 'PAID' });
+    orders.updateStatus.mockResolvedValue({
+      ...pendingOrder,
+      status: OrderStatus.PAID,
+    });
     prisma.payment.findFirst.mockResolvedValue(null);
     prisma.$transaction.mockImplementation((cb: (t: typeof tx) => Promise<unknown>) => cb(tx));
     tx.cup.updateMany.mockResolvedValue({ count: 1 });
@@ -81,15 +96,15 @@ describe('PaymentsService', () => {
     );
   });
 
-  it('persists a successful payment and updates the order status', async () => {
+  it('lưu payment thành công và chuyển đơn sang PAID', async () => {
     const payment = await service.processPayment(1, 'momo', 'idem-1');
 
-    expect(orders.updateStatus).toHaveBeenCalledWith(1, 'PAID', tx);
+    expect(orders.updateStatus).toHaveBeenCalledWith(1, OrderStatus.PAID, tx);
     expect(tx.payment.create).toHaveBeenCalledTimes(1);
     expect(payment).toMatchObject({ id: 1, orderId: 1, status: 'PAID' });
   });
 
-  it('deducts cups and ingredients inside the same transaction', async () => {
+  it('trừ ly và nguyên liệu trong cùng transaction', async () => {
     orders.findOne.mockResolvedValue(orderWithItems);
     tx.recipeItem.findMany.mockResolvedValue([
       { ingredientId: 1, amount: { mul: (n: number) => 18 * n }, ingredient: { name: 'Cà phê' } },
@@ -111,10 +126,10 @@ describe('PaymentsService', () => {
       where: { id: 2, quantity: { gte: 160 } },
       data: { quantity: { decrement: 160 } },
     });
-    expect(orders.updateStatus).toHaveBeenCalledWith(1, 'PAID', tx);
+    expect(orders.updateStatus).toHaveBeenCalledWith(1, OrderStatus.PAID, tx);
   });
 
-  it('rejects payment when cups of the requested size run out', async () => {
+  it('hết ly đúng size → chặn thanh toán, không ghi payment', async () => {
     orders.findOne.mockResolvedValue(orderWithItems);
     tx.cup.updateMany.mockResolvedValue({ count: 0 });
 
@@ -123,7 +138,7 @@ describe('PaymentsService', () => {
     expect(tx.payment.create).not.toHaveBeenCalled();
   });
 
-  it('rejects payment when an ingredient runs out', async () => {
+  it('hết nguyên liệu → chặn thanh toán', async () => {
     orders.findOne.mockResolvedValue(orderWithItems);
     tx.recipeItem.findMany.mockResolvedValue([
       { ingredientId: 2, amount: { mul: (n: number) => 80 * n }, ingredient: { name: 'Sữa' } },
@@ -135,23 +150,47 @@ describe('PaymentsService', () => {
     expect(tx.payment.create).not.toHaveBeenCalled();
   });
 
-  it('returns the stored payment for a repeated idempotency key', async () => {
+  it('key đã dùng với cùng nội dung → replay kết quả đã lưu', async () => {
     prisma.payment.findFirst.mockResolvedValue(storedPayment);
 
     await expect(service.processPayment(1, 'momo', 'idem-1')).resolves.toMatchObject({
       transactionId: 'TXN-MOMO-123456',
     });
-    expect(orders.findOne).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.payment.create).not.toHaveBeenCalled();
   });
 
-  it('rejects a second payment for an order that is already paid', async () => {
-    orders.findOne.mockResolvedValue({ ...pendingOrder, status: 'PAID' });
+  it('key đã dùng nhưng khác nội dung (method khác) → 400', async () => {
+    prisma.payment.findFirst.mockResolvedValue({
+      ...storedPayment,
+      requestFingerprint: '1:card',
+    });
+
+    await expect(service.processPayment(1, 'momo', 'idem-1')).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(tx.payment.create).not.toHaveBeenCalled();
+  });
+
+  it('đua cùng key: P2002 → đọc lại payment của bên thắng và replay', async () => {
+    prisma.payment.findFirst
+      .mockResolvedValueOnce(null) // pre-check: chưa có
+      .mockResolvedValueOnce(storedPayment); // sau P2002: bên thắng đã ghi
+    prisma.$transaction.mockRejectedValue({ code: 'P2002' });
+
+    await expect(service.processPayment(1, 'momo', 'idem-1')).resolves.toMatchObject({
+      transactionId: 'TXN-MOMO-123456',
+    });
+    expect(tx.payment.create).not.toHaveBeenCalled();
+  });
+
+  it('từ chối thanh toán lần hai cho đơn đã PAID', async () => {
+    orders.findOne.mockResolvedValue({ ...pendingOrder, status: OrderStatus.PAID });
     await expect(service.processPayment(1, 'card')).rejects.toThrow(BadRequestException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('passes through a missing-order error', async () => {
+  it('đơn không tồn tại → lỗi truyền thẳng 404', async () => {
     orders.findOne.mockRejectedValue(new NotFoundException());
     await expect(service.processPayment(999, 'momo')).rejects.toThrow(NotFoundException);
   });
@@ -212,12 +251,12 @@ describe('PaymentsService', () => {
       process.env.SEPAY_ACC = acc;
     });
 
-    it('webhook đúng khóa API + đủ tiền trong hạn → trừ kho và hoàn tất đơn', async () => {
+    it('webhook đủ tiền trong hạn → trừ kho và hoàn tất đơn', async () => {
       prisma.payment.findUnique.mockResolvedValue(sepayPayment);
       tx.payment.updateMany.mockResolvedValue({ count: 1 }); // claim thành công
       orders.findOne.mockResolvedValue(orderWithItems);
 
-      const res = await service.handleWebhook('Apikey sepay-secret', {
+      const res = await service.handleWebhook({
         id: 92704,
         code: 'PLABCDEF1234',
         transferType: 'in',
@@ -230,13 +269,18 @@ describe('PaymentsService', () => {
         expect.objectContaining({ where: { id: 10, status: 'PENDING' } }),
       );
       expect(tx.cup.updateMany).toHaveBeenCalled();
-      expect(orders.updateStatus).toHaveBeenCalledWith(1, 'PAID', tx);
+      expect(orders.updateStatus).toHaveBeenCalledWith(1, OrderStatus.PAID, tx);
     });
 
-    it('webhook sai khóa API → 401', async () => {
-      await expect(
-        service.handleWebhook('Apikey khong-dung', { transferType: 'in' }),
-      ).rejects.toThrow(UnauthorizedException);
+    it('webhook chuyển khoản lạ (không khớp mã) → bỏ qua an toàn', async () => {
+      const res = await service.handleWebhook({
+        id: 1,
+        content: 'chuyen khoan la',
+        transferType: 'in',
+        transferAmount: 100000,
+      });
+      expect(res).toEqual({ success: true });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('webhook nhận tiền sau hạn 2 phút → EXPIRED, không hoàn tất đơn', async () => {
@@ -246,7 +290,7 @@ describe('PaymentsService', () => {
       });
       prisma.payment.update.mockResolvedValue(sepayPayment);
 
-      const res = await service.handleWebhook('Apikey sepay-secret', {
+      const res = await service.handleWebhook({
         id: 92705,
         code: 'PLABCDEF1234',
         transferType: 'in',
@@ -268,7 +312,7 @@ describe('PaymentsService', () => {
       prisma.payment.findUnique.mockResolvedValue(sepayPayment);
       prisma.payment.update.mockResolvedValue(sepayPayment);
 
-      await service.handleWebhook('Apikey sepay-secret', {
+      await service.handleWebhook({
         id: 92706,
         code: 'PLABCDEF1234',
         transferType: 'in',
@@ -295,6 +339,38 @@ describe('PaymentsService', () => {
 
       expect(record).toMatchObject({ status: 'EXPIRED', paymentCode: 'PLABCDEF1234' });
       expect(prisma.payment.update).toHaveBeenCalled();
+    });
+
+    it('mô phỏng chuyển khoản (demo) đi qua webhook → hoàn tất đơn', async () => {
+      prisma.payment.findFirst.mockResolvedValue(sepayPayment);
+      tx.payment.updateMany.mockResolvedValue({ count: 1 });
+      orders.findOne.mockResolvedValue(orderWithItems);
+
+      const res = await service.simulateSePayPayment(1);
+
+      expect(res).toEqual({ success: true });
+      expect(tx.payment.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 10, status: 'PENDING' } }),
+      );
+      expect(orders.updateStatus).toHaveBeenCalledWith(1, OrderStatus.PAID, tx);
+    });
+
+    it('mô phỏng bị chặn khi NODE_ENV=production', async () => {
+      const prev = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        await expect(service.simulateSePayPayment(1)).rejects.toThrow(ForbiddenException);
+        expect(prisma.payment.findFirst).not.toHaveBeenCalled();
+      } finally {
+        process.env.NODE_ENV = prev;
+      }
+    });
+
+    it('mô phỏng khi không còn phiên PENDING → 400', async () => {
+      orders.findOne.mockResolvedValue(pendingOrder);
+      prisma.payment.findFirst.mockResolvedValue(null);
+
+      await expect(service.simulateSePayPayment(1)).rejects.toThrow(BadRequestException);
     });
   });
 });
