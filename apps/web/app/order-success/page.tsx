@@ -40,12 +40,29 @@ function OrderSuccessContent() {
         </div>
       </div>
 
-      <button
-        onClick={() => router.push('/')}
-        className="w-full bg-[#006A32] hover:bg-[#005227] text-white py-3.5 rounded-2xl font-bold text-sm shadow-lg shadow-[#006A32]/25 active:scale-95 transition-all"
-      >
-        Tiếp tục đặt món
-      </button>
+      {/* Task 9: xem trạng thái thật của đơn và lịch sử đơn */}
+      {/^\d+$/.test(orderId) && (
+        <button
+          onClick={() => router.push(`/orders/${orderId}`)}
+          className="w-full border border-[#006A32] text-[#006A32] hover:bg-emerald-50 py-3.5 rounded-2xl font-bold text-sm transition-all"
+        >
+          Xem chi tiết đơn #{orderId}
+        </button>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          onClick={() => router.push('/orders')}
+          className="w-full border border-stone-300 hover:bg-stone-50 py-3.5 rounded-2xl font-bold text-sm transition-all"
+        >
+          Lịch sử đơn
+        </button>
+        <button
+          onClick={() => router.push('/')}
+          className="w-full bg-[#006A32] hover:bg-[#005227] text-white py-3.5 rounded-2xl font-bold text-sm shadow-lg shadow-[#006A32]/25 active:scale-95 transition-all"
+        >
+          Tiếp tục đặt món
+        </button>
+      </div>
     </div>
   );
 }
