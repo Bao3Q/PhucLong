@@ -12,7 +12,7 @@
 | **FR-04** Đăng ký / đăng nhập JWT | US-04 Xác thực | Task2_3_Class (User) | `POST /auth/register`, `POST /auth/login` — `apps/api/src/auth/auth.controller.ts`; client: `apps/web/lib/auth.ts` | **API-T02** `auth.service.spec.ts` · **API-T05** `jwt-auth.guard.spec.ts` |
 | **FR-05** Tạo đơn hàng | UC-01 Đặt và thanh toán | Task2_2_Sequence (tạo đơn) · Task2_1_Activity | `POST /orders` (JwtAuthGuard) — `apps/api/src/orders/orders.controller.ts`, `orders.service.ts` | **API-T03** `orders.service.spec.ts` (persist + items, từ chối giỏ rỗng) · AC-01 qua `jwt-auth.guard.spec.ts` |
 | **FR-06** Thanh toán Ví/Thẻ mô phỏng | UC-01 (bước 6–7) | Task2_2_Sequence (alt thành công/thất bại, idempotency) · ADR-003 | `POST /payments`, `GET /payments/:orderId` — `apps/api/src/payments/payments.service.ts` | **API-T04** `payments.service.spec.ts` (idempotency, trừ kho trong transaction, hết ly/nguyên liệu, đã PAID) |
-| **FR-07** Trạng thái & chi tiết đơn | US-05 Theo dõi đơn | Task2_1_Activity (theo dõi) | `GET /orders/:id` — `orders.service.ts`; UI: `apps/web/app/order-success/page.tsx` | **API-T03** `orders.service.spec.ts` (load đơn, 404 khi không tồn tại). ⚠️ API list đơn theo user + trang lịch sử — *chưa làm* |
+| **FR-07** Xác nhận, trạng thái & lịch sử đơn | US-05 Theo dõi đơn | Task2_1_Activity (theo dõi) | `GET /orders/me`, `GET /orders/:id` (JwtAuthGuard, trả `toOrderResponse`) — `orders.controller.ts`, `orders.service.ts`; UI xác nhận: `apps/web/app/orders/[id]/page.tsx` (tự cập nhật khi PENDING), lịch sử: `apps/web/app/orders/page.tsx`, client: `apps/web/lib/orders.ts` | **API-T03** `orders.service.spec.ts` (load đơn, 403 đơn người khác, 404, lịch sử chỉ đơn của mình) · **API-T08** `orders.controller.spec.ts` (DTO không lộ `userId`, 403/404, `/orders/me`) |
 | **FR-08** Khuyến mãi (Could) | US-06 Nhập mã giảm giá | Task2_3_Class (Promotion) | Model `Promotion`, `Order.voucherCode` — `apps/api/prisma/schema.prisma` | — *chưa có endpoint/UI/test (mức Could, trong kế hoạch sau 5 task bắt buộc)* |
 
 ## 2. Yêu cầu phi chức năng (NFR)
@@ -26,6 +26,6 @@
 
 ## 3. Thống kê
 
-- **Test tự động hiện có** (7 suites, 60 test — `npm test`): API-T01 → API-T07 như trên.
-- **Thiếu (đã lên kế hoạch Task 5.2)**: integration test tạo đơn → thanh toán trên HTTP thật (supertest), E2E luồng menu → xác nhận đơn (FR-02/FR-03/AC-05), API list đơn theo user (FR-07), luồng khuyến mãi (FR-08).
+- **Test tự động hiện có** (`npm test`): API-T01 → API-T08 như trên (API-T08 thêm ở Task 9).
+- **Thiếu (đã lên kế hoạch Task 5.2)**: integration test tạo đơn → thanh toán trên HTTP thật (supertest), E2E luồng menu → xác nhận đơn (FR-02/FR-03/AC-05), luồng khuyến mãi (FR-08).
 - **Quy tắc**: mọi PR mới bổ sung code phải cập nhật ma trận này (theo DoD mục 2.3 README).
