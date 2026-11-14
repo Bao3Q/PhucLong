@@ -54,6 +54,7 @@ export default function CheckoutPage() {
           size: item.size,
           quantity: item.quantity,
           unitPrice: item.totalPrice / item.quantity,
+          toppings: (item.toppings ?? []).map((topping) => topping.name),
           note: item.note,
         })),
       };
@@ -165,7 +166,7 @@ export default function CheckoutPage() {
                     <div className="flex-1">
                       <h4 className="font-bold text-sm">{item.product.name}</h4>
                       <p className="text-xs text-gray-400">
-                        Size {item.size} {item.hasTranChau ? '+ Trân châu' : ''} {item.hasKem ? '+ Kem' : ''} - x{item.quantity}
+                        Size {item.size} {(item.toppings ?? []).map((topping) => `+ ${topping.name}`).join(' ')} - x{item.quantity}
                       </p>
                       {item.note && <p className="text-[11px] text-amber-600 italic">Ghi chú: {item.note}</p>}
                       <button

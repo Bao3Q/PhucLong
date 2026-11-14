@@ -1,3 +1,9 @@
+export interface ProductOption {
+  id: number;
+  name: string;
+  price: number;
+}
+
 export interface Product {
   id: number;
   name: string;
@@ -6,13 +12,13 @@ export interface Product {
   description: string;
   image: string;
   tag?: string | null;
+  toppings: ProductOption[];
 }
 
 export interface CartItem {
   product: Product;
   size: 'S' | 'M' | 'L';
-  hasTranChau: boolean;
-  hasKem: boolean;
+  toppings: ProductOption[];
   note: string;
   quantity: number;
   totalPrice: number;

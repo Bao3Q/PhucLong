@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Product, CartItem } from '@/app/types';
+import { Product, ProductOption, CartItem } from '@/app/types';
 
 interface ProductModalProps {
   isOpen: boolean;
@@ -12,16 +12,14 @@ interface ProductModalProps {
 
 export default function ProductModal({ isOpen, onClose, product, onAddToCart }: ProductModalProps) {
   const [size, setSize] = useState<'S' | 'M' | 'L'>('S');
-  const [hasTranChau, setHasTranChau] = useState(false);
-  const [hasKem, setHasKem] = useState(false);
+  const [selectedToppings, setSelectedToppings] = useState<ProductOption[]>([]);
   const [note, setNote] = useState('');
   const [quantity, setQuantity] = useState(1);
 
   useEffect(() => {
     if (product) {
       setSize('S');
-      setHasTranChau(false);
-      setHasKem(false);
+      setSelectedToppings([]);
       setNote('');
       setQuantity(1);
     }
@@ -36,7 +34,7 @@ export default function ProductModal({ isOpen, onClose, product, onAddToCart }: 
     return 0; // Size S
   };
 
-  const toppingTotal = (hasTranChau ? 5000 : 0) + (hasKem ? 5000 : 0);
+  const toppingTotal = selectedToppings.reduce((total, topping) => total + topping.price, 0);
   const unitPrice = product.basePrice + getSizeAdjustment() + toppingTotal;
   const totalPrice = unitPrice * quantity;
 
@@ -44,8 +42,7 @@ export default function ProductModal({ isOpen, onClose, product, onAddToCart }: 
     onAddToCart({
       product,
       size,
-      hasTranChau,
-      hasKem,
+      toppings: selectedToppings,
       note,
       quantity,
       totalPrice,
@@ -110,31 +107,29 @@ export default function ProductModal({ isOpen, onClose, product, onAddToCart }: 
                 Topping <span className="text-gray-400 font-normal">Có thể chọn nhiều</span>
               </label>
               <div className="space-y-2">
-                <label className="flex items-center justify-between p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50">
-                  <div className="flex items-center space-x-3">
-                    <input 
-                      type="checkbox" 
-                      checked={hasTranChau} 
-                      onChange={(e) => setHasTranChau(e.target.checked)}
-                      className="w-4 h-4 text-[#006A32] rounded focus:ring-[#006A32]"
-                    />
-                    <span className="text-sm font-medium text-gray-800">Trân châu</span>
-                  </div>
-                  <span className="text-xs text-gray-500">+5.000đ</span>
-                </label>
-
-                <label className="flex items-center justify-between p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50">
-                  <div className="flex items-center space-x-3">
-                    <input 
-                      type="checkbox" 
-                      checked={hasKem} 
-                      onChange={(e) => setHasKem(e.target.checked)}
-                      className="w-4 h-4 text-[#006A32] rounded focus:ring-[#006A32]"
-                    />
-                    <span className="text-sm font-medium text-gray-800">Kem</span>
-                  </div>
-                  <span className="text-xs text-gray-500">+5.000đ</span>
-                </label>
+                {product.toppings?.length ? product.toppings.map((topping) => {
+                  const isSelected = selectedToppings.some(({ id }) => id === topping.id);
+                  return (
+                    <label key={topping.id} className="flex items-center justify-between p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50">
+                      <div className="flex items-center space-x-3">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => setSelectedToppings((current) =>
+                            e.target.checked
+                              ? [...current, topping]
+                              : current.filter(({ id }) => id !== topping.id)
+                          )}
+                          className="w-4 h-4 text-[#006A32] rounded focus:ring-[#006A32]"
+                        />
+                        <span className="text-sm font-medium text-gray-800">{topping.name}</span>
+                      </div>
+                      <span className="text-xs text-gray-500">
+                        +{topping.price.toLocaleString('vi-VN')}đ
+                      </span>
+                    </label>
+                  );
+                }) : <p className="text-sm text-gray-500">Món này chưa có topping.</p>}
               </div>
             </div>
 
