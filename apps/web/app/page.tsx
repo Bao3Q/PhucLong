@@ -7,7 +7,7 @@ import { Product, CartItem } from '@/app/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
-const categories = ['Tất cả', 'Trà Sữa', 'Trà Trái Cây', 'Cà Phê'];
+const categories = ['Tất cả', 'Cà Phê'];
 
 export default function Home() {
   const router = useRouter();
