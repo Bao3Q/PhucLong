@@ -35,11 +35,11 @@ describe('AuthService', () => {
   describe('register', () => {
     it('lưu mật khẩu đã băm bcrypt, không lưu mật khẩu gốc', async () => {
       const user = await service.register({
-        email: 'kh@maycha.vn',
+        email: 'kh@phuclong.vn',
         password: 'matkhau123',
       });
 
-      const stored = await repo.findByEmail('kh@maycha.vn');
+      const stored = await repo.findByEmail('kh@phuclong.vn');
       expect(stored?.passwordHash).toMatch(/^\$2[aby]\$/);
       expect(stored?.passwordHash).not.toContain('matkhau123');
       expect(await bcrypt.compare('matkhau123', stored!.passwordHash)).toBe(
@@ -47,7 +47,7 @@ describe('AuthService', () => {
       );
       expect(user).toEqual({
         id: stored!.id,
-        email: 'kh@maycha.vn',
+        email: 'kh@phuclong.vn',
         role: 'CUSTOMER',
         loyaltyPoints: 0,
       });
@@ -55,28 +55,28 @@ describe('AuthService', () => {
 
     it('không trả passwordHash ra ngoài', async () => {
       const user = await service.register({
-        email: 'kh@maycha.vn',
+        email: 'kh@phuclong.vn',
         password: 'matkhau123',
       });
       expect(user).not.toHaveProperty('passwordHash');
     });
 
     it('409 khi email đã tồn tại (không phân biệt hoa/thường)', async () => {
-      await service.register({ email: 'kh@maycha.vn', password: 'matkhau123' });
+      await service.register({ email: 'kh@phuclong.vn', password: 'matkhau123' });
       await expect(
-        service.register({ email: 'KH@Maycha.vn', password: 'matkhau456' }),
+        service.register({ email: 'KH@phuclong.vn', password: 'matkhau456' }),
       ).rejects.toThrow(ConflictException);
     });
   });
 
   describe('login', () => {
     beforeEach(async () => {
-      await service.register({ email: 'kh@maycha.vn', password: 'matkhau123' });
+      await service.register({ email: 'kh@phuclong.vn', password: 'matkhau123' });
     });
 
     it('phát JWT hợp lệ có sub = id user và email', async () => {
       const result = await service.login({
-        email: 'kh@maycha.vn',
+        email: 'kh@phuclong.vn',
         password: 'matkhau123',
       });
       const payload = verifyJwt(result.accessToken, SECRET);
@@ -84,17 +84,17 @@ describe('AuthService', () => {
       expect(result.tokenType).toBe('Bearer');
       expect(result.expiresIn).toBe(3600);
       expect(payload.sub).toBe(result.user.id);
-      expect(payload.email).toBe('kh@maycha.vn');
+      expect(payload.email).toBe('kh@phuclong.vn');
       expect(payload.role).toBe('CUSTOMER');
       expect(result.user).not.toHaveProperty('passwordHash');
     });
 
     it('đưa role ADMIN đã lưu vào thông tin user và JWT', async () => {
       const passwordHash = await bcrypt.hash('123456', 4);
-      await repo.create('quanly@maycha.vn', passwordHash, 'ADMIN');
+      await repo.create('quanly@phuclong.vn', passwordHash, 'ADMIN');
 
       const result = await service.login({
-        email: 'quanly@maycha.vn',
+        email: 'quanly@phuclong.vn',
         password: '123456',
       });
 
@@ -104,16 +104,16 @@ describe('AuthService', () => {
 
     it('401 khi sai mật khẩu', async () => {
       await expect(
-        service.login({ email: 'kh@maycha.vn', password: 'sai-mat-khau' }),
+        service.login({ email: 'kh@phuclong.vn', password: 'sai-mat-khau' }),
       ).rejects.toThrow(UnauthorizedException);
     });
 
     it('401 cùng thông điệp khi email không tồn tại', async () => {
       const wrongPassword = await service
-        .login({ email: 'kh@maycha.vn', password: 'sai-mat-khau' })
+        .login({ email: 'kh@phuclong.vn', password: 'sai-mat-khau' })
         .catch((e: Error) => e.message);
       const unknownEmail = await service
-        .login({ email: 'khong-co@maycha.vn', password: 'matkhau123' })
+        .login({ email: 'khong-co@phuclong.vn', password: 'matkhau123' })
         .catch((e: Error) => e.message);
 
       expect(unknownEmail).toBe(wrongPassword);
@@ -122,14 +122,14 @@ describe('AuthService', () => {
     it('500 khi server chưa cấu hình JWT_SECRET', async () => {
       delete process.env.JWT_SECRET;
       await expect(
-        service.login({ email: 'kh@maycha.vn', password: 'matkhau123' }),
+        service.login({ email: 'kh@phuclong.vn', password: 'matkhau123' }),
       ).rejects.toThrow(InternalServerErrorException);
     });
   });
 
-  it('có sẵn tài khoản ADMIN mặc định (admin@maycha.vn / Admin@123456)', async () => {
+  it('có sẵn tài khoản ADMIN mặc định (admin@phuclong.vn / Admin@123456)', async () => {
     const result = await service.login({
-      email: 'admin@maycha.vn',
+      email: 'admin@phuclong.vn',
       password: 'Admin@123456',
     });
     expect(result.user.role).toBe('ADMIN');
