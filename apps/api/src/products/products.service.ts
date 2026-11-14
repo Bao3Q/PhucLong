@@ -64,11 +64,4 @@ export class ProductsService {
     this.products = this.products.map((p) => (p.id === id ? updated : p));
     return updated;
   }
-
-  /** ADMIN: xóa sản phẩm. */
-  async remove(id: number): Promise<{ deleted: true; id: number }> {
-    await this.findOne(id);
-    this.products = this.products.filter((p) => p.id !== id);
-    return { deleted: true, id };
-  }
 }

@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -51,13 +50,5 @@ export class ProductsController {
     @Body() dto: UpdateProductDto,
   ): Promise<Product> {
     return this.productsService.update(id, dto);
-  }
-
-  // Chỉ ADMIN được xóa
-  @Delete(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.productsService.remove(id);
   }
 }

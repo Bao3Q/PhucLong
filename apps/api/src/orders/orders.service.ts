@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { OrderStatus, Prisma, ProductSize, UserRole } from '../generated/prisma/client';
 import type { AuthUser } from '../common/auth/auth-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
@@ -74,7 +79,11 @@ export class OrdersService {
     return this.toOrder(order);
   }
 
-  async findOne(id: string | number): Promise<Order> {
+  /**
+   * Lấy đơn theo mã. Khi có `user` (route đã qua JwtAuthGuard), chỉ chủ đơn
+   * hoặc ADMIN được xem; lời gọi nội bộ (payments…) không truyền `user`.
+   */
+  async findOne(id: string | number, user?: AuthUser): Promise<Order> {
     const orderId = Number(id);
     if (!Number.isInteger(orderId)) {
       throw new NotFoundException(`Không tìm thấy đơn hàng với mã ${id}`);
@@ -86,6 +95,9 @@ export class OrdersService {
     });
     if (!order) {
       throw new NotFoundException(`Không tìm thấy đơn hàng với mã ${id}`);
+    }
+    if (user && user.role !== 'ADMIN' && order.userId !== user.id) {
+      throw new ForbiddenException('Chỉ được xem đơn hàng của chính mình');
     }
     return this.toOrder(order);
   }

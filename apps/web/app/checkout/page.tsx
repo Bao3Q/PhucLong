@@ -7,12 +7,33 @@ import { clearToken, getToken } from '@/lib/auth';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
+type PaymentMethod = 'momo' | 'card' | 'sepay';
+type PayStatus = 'waiting' | 'expired' | 'failed';
+
+/** Phiên thanh toán SePay trả về từ POST /payments/sepay. */
+interface SePaySession {
+  orderId: number;
+  paymentCode: string;
+  qrUrl: string;
+  amount: number;
+  expiresAt: string;
+}
+
+function formatCountdown(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
 export default function CheckoutPage() {
   const router = useRouter();
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [paymentMethod, setPaymentMethod] = useState<'momo' | 'card'>('momo');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('sepay');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Phiên thanh toán SePay: có session → hiện màn hình QR thay cho form
+  const [session, setSession] = useState<SePaySession | null>(null);
+  const [payStatus, setPayStatus] = useState<PayStatus>('waiting');
+  const [secondsLeft, setSecondsLeft] = useState(0);
 
   useEffect(() => {
     const savedCart = localStorage.getItem('phuclong_cart');
@@ -25,6 +46,55 @@ export default function CheckoutPage() {
     }
   }, []);
 
+  // Đếm ngược từ hạn chót do server trả (expiresAt) + poll trạng thái mỗi 3 giây.
+  // Backend là nguồn sự thật: webhook SePay hay hết hạn đều được poll phản ánh.
+  useEffect(() => {
+    if (!session || payStatus !== 'waiting') return;
+
+    const deadline = new Date(session.expiresAt).getTime();
+    let pollCount = 0;
+    let stopped = false;
+
+    const timer = setInterval(() => {
+      const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+      setSecondsLeft(left);
+      if (left <= 0) {
+        setPayStatus('expired');
+        return;
+      }
+
+      pollCount += 1;
+      if (pollCount % 3 !== 0) return;
+
+      fetch(`${API_BASE_URL}/payments/${session.orderId}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (stopped || !data) return;
+          if (data.status === 'PAID') {
+            stopped = true;
+            localStorage.removeItem('phuclong_cart');
+            router.push(
+              `/order-success?orderId=${data.orderId}&transId=${data.transactionId}`,
+            );
+          } else if (data.status === 'EXPIRED') {
+            setPayStatus('expired');
+          } else if (data.status === 'FAILED') {
+            setPayStatus('failed');
+          }
+        })
+        .catch(() => {
+          // lỗi mạng tạm thời: tiếp tục poll, hết hạn do đếm ngược phía client
+        });
+    }, 1000);
+
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [session, payStatus, router]);
+
   const totalCartPrice = cart.reduce((sum, item) => sum + item.totalPrice, 0);
 
   const handleRemoveItem = (index: number) => {
@@ -32,6 +102,60 @@ export default function CheckoutPage() {
     setCart(updatedCart);
     localStorage.setItem('phuclong_cart', JSON.stringify(updatedCart));
   };
+
+  async function createOrder(token: string) {
+    const orderPayload = {
+      items: cart.map((item) => ({
+        productId: item.product.id,
+        productName: item.product.name,
+        size: item.size,
+        quantity: item.quantity,
+        unitPrice: item.totalPrice / item.quantity,
+        toppings: (item.toppings ?? []).map((topping) => topping.name),
+        note: item.note,
+      })),
+    };
+
+    const orderRes = await fetch(`${API_BASE_URL}/orders`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(orderPayload),
+    });
+
+    if (orderRes.status === 401) {
+      // Token hết hạn hoặc không hợp lệ → đăng nhập lại.
+      clearToken();
+      router.push('/login?next=/checkout');
+      return null;
+    }
+    if (!orderRes.ok) {
+      throw new Error(`Tạo đơn thất bại (${orderRes.status})`);
+    }
+    return orderRes.json();
+  }
+
+  async function createSePaySession(orderId: number, token: string) {
+    const res = await fetch(`${API_BASE_URL}/payments/sepay`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ orderId }),
+    });
+    if (res.status === 401) {
+      clearToken();
+      router.push('/login?next=/checkout');
+      return null;
+    }
+    if (!res.ok) {
+      throw new Error(`Tạo phiên thanh toán SePay thất bại (${res.status})`);
+    }
+    return res.json();
+  }
 
   const handleConfirmPayment = async () => {
     if (cart.length === 0) return;
@@ -47,40 +171,20 @@ export default function CheckoutPage() {
     setErrorMessage(null);
 
     try {
-      const orderPayload = {
-        items: cart.map((item) => ({
-          productId: item.product.id,
-          productName: item.product.name,
-          size: item.size,
-          quantity: item.quantity,
-          unitPrice: item.totalPrice / item.quantity,
-          toppings: (item.toppings ?? []).map((topping) => topping.name),
-          note: item.note,
-        })),
-      };
+      const orderData = await createOrder(token);
+      if (!orderData) return;
 
-      const orderRes = await fetch(`${API_BASE_URL}/orders`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(orderPayload),
-      });
-
-      if (orderRes.status === 401) {
-        // Token hết hạn hoặc không hợp lệ → đăng nhập lại.
-        clearToken();
-        router.push('/login?next=/checkout');
+      if (paymentMethod === 'sepay') {
+        // Thanh toán online SePay: tạo phiên QR rồi sang màn hình chờ,
+        // đơn chỉ PAID khi webhook SePay xác nhận tiền đã vào tài khoản.
+        const sessionData = await createSePaySession(orderData.id, token);
+        if (!sessionData) return;
+        setSession(sessionData);
+        setPayStatus('waiting');
         return;
       }
 
-      if (!orderRes.ok) {
-        throw new Error(`Tạo đơn thất bại (${orderRes.status})`);
-      }
-
-      const orderData = await orderRes.json();
-
+      // Luồng momo/card (hoàn tất ngay) giữ nguyên.
       const idempotencyKey = `IDEM-${Date.now()}-${orderData.id}`;
       const payRes = await fetch(`${API_BASE_URL}/payments`, {
         method: 'POST',
@@ -112,17 +216,133 @@ export default function CheckoutPage() {
     }
   };
 
+  // "Thử lại" sau khi phiên hết hạn/thất bại: tạo phiên mới cho cùng đơn hàng.
+  const handleRetrySePay = async () => {
+    const token = getToken();
+    if (!token || !session) return;
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const sessionData = await createSePaySession(session.orderId, token);
+      if (!sessionData) return;
+      setSession(sessionData);
+      setPayStatus('waiting');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Không tạo lại được phiên thanh toán.';
+      setErrorMessage(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const header = (
+    <header className="bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center">
+      <div className="flex items-center space-x-2 cursor-pointer" onClick={() => router.push('/')}>
+        <span className="bg-[#006A32] text-white px-2.5 py-1 rounded-md font-bold text-sm">PL</span>
+        <span className="font-bold tracking-wider text-gray-900">PHÚC LONG</span>
+      </div>
+      <button onClick={() => router.push('/')} className="text-sm font-semibold text-[#006A32]">
+        ← Quay lại menu
+      </button>
+    </header>
+  );
+
+  // ===== MÀN HÌNH QR SEPAY (đang chờ chuyển khoản hoặc hết hạn/thất bại) =====
+  if (session) {
+    return (
+      <div className="min-h-screen bg-[#F7F6F2] text-gray-900">
+        {header}
+        <main className="max-w-md mx-auto px-6 py-10">
+          <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm text-center space-y-5">
+            <span className="inline-block text-xs font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-3 py-1 rounded-full">
+              Thanh toán chuyển khoản qua SePay
+            </span>
+            <h1 className="text-xl font-bold">Quét mã QR để thanh toán</h1>
+            <p className="text-xs text-gray-500">
+              Dùng app ngân hàng quét mã bên dưới — hệ thống tự xác nhận khi tiền vào tài khoản.
+            </p>
+
+            <div className="flex justify-center">
+              <img
+                src={session.qrUrl}
+                alt="Mã QR SePay"
+                className="w-56 h-56 rounded-2xl border border-gray-100 bg-white"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <p className="text-xs text-gray-400">Số tiền</p>
+              <p className="text-2xl font-extrabold text-[#006A32]">
+                {session.amount.toLocaleString('vi-VN')}₫
+              </p>
+              <p className="text-xs text-gray-500">
+                Nội dung chuyển khoản: <span className="font-bold text-gray-900">{session.paymentCode}</span>
+              </p>
+            </div>
+
+            {payStatus === 'waiting' && (
+              <div className="space-y-3">
+                <div className="inline-flex items-center space-x-2 bg-[#006A32]/5 border border-[#006A32]/20 rounded-full px-4 py-2">
+                  <span className="w-2 h-2 bg-[#006A32] rounded-full animate-pulse"></span>
+                  <span className="text-xs font-bold text-[#006A32]">
+                    Đang chờ chuyển khoản — còn {formatCountdown(secondsLeft)}
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-400">
+                  Sau 2 phút không thanh toán, phiên sẽ hết hạn và bạn có thể tạo lại mã QR.
+                </p>
+              </div>
+            )}
+
+            {payStatus === 'expired' && (
+              <div className="space-y-4">
+                <p role="alert" className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-700">
+                  ⏰ Hết thời gian thanh toán (2 phút). Đơn hàng vẫn được giữ, hãy thử lại nếu cần.
+                </p>
+                <button
+                  onClick={handleRetrySePay}
+                  disabled={isSubmitting}
+                  className="w-full py-3 rounded-2xl font-bold text-white bg-[#006A32] hover:bg-[#005227] transition disabled:opacity-60"
+                >
+                  {isSubmitting ? 'Đang tạo mã QR mới…' : 'Tạo lại mã QR (giữ nguyên đơn)'}
+                </button>
+              </div>
+            )}
+
+            {payStatus === 'failed' && (
+              <div className="space-y-4">
+                <p role="alert" className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-xs text-red-700">
+                  ⚠️ Thanh toán không thành công (số tiền không đủ hoặc đơn đã được thanh toán).
+                </p>
+                <button
+                  onClick={handleRetrySePay}
+                  disabled={isSubmitting}
+                  className="w-full py-3 rounded-2xl font-bold text-white bg-[#006A32] hover:bg-[#005227] transition disabled:opacity-60"
+                >
+                  {isSubmitting ? 'Đang tạo mã QR mới…' : 'Tạo lại mã QR'}
+                </button>
+              </div>
+            )}
+
+            <button
+              onClick={() => {
+                setSession(null);
+                setPayStatus('waiting');
+              }}
+              className="text-xs font-semibold text-gray-400 hover:text-gray-600 underline"
+            >
+              ← Chọn lại phương thức thanh toán
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // ===== FORM XÁC NHẬN ĐƠN =====
   return (
     <div className="min-h-screen bg-[#F7F6F2] text-gray-900">
-      <header className="bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center">
-        <div className="flex items-center space-x-2 cursor-pointer" onClick={() => router.push('/')}>
-          <span className="bg-[#006A32] text-white px-2.5 py-1 rounded-md font-bold text-sm">PL</span>
-          <span className="font-bold tracking-wider text-gray-900">PHÚC LONG</span>
-        </div>
-        <button onClick={() => router.push('/')} className="text-sm font-semibold text-[#006A32]">
-          ← Quay lại menu
-        </button>
-      </header>
+      {header}
 
       <main className="max-w-5xl mx-auto px-6 py-10 space-y-6">
         <div className="text-center space-y-1">
@@ -188,6 +408,21 @@ export default function CheckoutPage() {
 
               <div className="space-y-2">
                 <label className="text-xs font-bold uppercase text-gray-400 block">Phương thức thanh toán</label>
+
+                <div
+                  onClick={() => setPaymentMethod('sepay')}
+                  className={`p-4 rounded-2xl border cursor-pointer flex items-center justify-between transition ${paymentMethod === 'sepay' ? 'border-[#006A32] bg-[#006A32]/5' : 'border-gray-200'
+                    }`}
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-[#006A32] rounded-lg flex items-center justify-center text-white font-bold text-xs">₫</div>
+                    <div>
+                      <h5 className="font-bold text-xs">Chuyển khoản ngân hàng</h5>
+                      <p className="text-[10px] text-gray-400">SePay — quét QR, tự xác nhận trong 2 phút</p>
+                    </div>
+                  </div>
+                  <input type="radio" checked={paymentMethod === 'sepay'} readOnly className="text-[#006A32]" />
+                </div>
 
                 <div
                   onClick={() => setPaymentMethod('momo')}

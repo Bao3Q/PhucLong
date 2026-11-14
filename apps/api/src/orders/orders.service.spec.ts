@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import type { AuthUser } from '../common/auth/auth-user.interface';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -83,5 +87,22 @@ describe('OrdersService', () => {
   it('throws when the requested order does not exist', async () => {
     prisma.order.findUnique.mockResolvedValue(null);
     await expect(service.findOne(999)).rejects.toThrow(NotFoundException);
+  });
+
+  it('chủ đơn được xem đơn của mình', async () => {
+    prisma.order.findUnique.mockResolvedValue(storedOrder);
+    await expect(service.findOne(1, user)).resolves.toMatchObject({ id: 1 });
+  });
+
+  it('user khác xem đơn của người khác → Forbidden', async () => {
+    prisma.order.findUnique.mockResolvedValue(storedOrder);
+    const stranger: AuthUser = { id: 'other-user-id', role: 'CUSTOMER' };
+    await expect(service.findOne(1, stranger)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('ADMIN được xem đơn của bất kỳ ai', async () => {
+    prisma.order.findUnique.mockResolvedValue(storedOrder);
+    const admin: AuthUser = { id: 'admin-id', role: 'ADMIN' };
+    await expect(service.findOne(1, admin)).resolves.toMatchObject({ id: 1 });
   });
 });
