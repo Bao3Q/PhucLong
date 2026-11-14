@@ -452,13 +452,13 @@ END
 $$;
 
 -- Tài khoản ADMIN mặc định để đăng nhập / thử API (Thunder Client, Postman...).
--- Email    : admin@maycha.vn
+-- Email    : admin@phuclong.vn
 -- Mật khẩu : Admin@123456   (hash bcrypt bên dưới, cost 10)
 
 INSERT INTO "User" ("id", "email", "passwordHash", "role", "loyaltyPoints", "createdAt")
 VALUES (
   '00000000-0000-4000-8000-000000000001',
-  'admin@maycha.vn',
+  'admin@phuclong.vn',
   '$2b$10$6QjZRCXeZIk1rYpQaxbQfOZK4p.6T.DVVbWFXSFikJEgA.nMLrP56',
   'ADMIN',
   0,

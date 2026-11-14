@@ -64,10 +64,10 @@ describe('JwtAuthGuard', () => {
 
   it('cho qua và gắn request.user khi token hợp lệ', () => {
     const { ctx, request } = contextWith(
-      `Bearer ${signJwt({ sub: 42, email: 'kh@maycha.vn' }, SECRET)}`,
+      `Bearer ${signJwt({ sub: 42, email: 'kh@phuclong.vn' }, SECRET)}`,
     );
     expect(guard.canActivate(ctx)).toBe(true);
-    expect(request.user).toEqual({ id: '42', email: 'kh@maycha.vn' });
+    expect(request.user).toEqual({ id: '42', email: 'kh@phuclong.vn' });
   });
 
   it('401 khi thiếu header Authorization', () => {
