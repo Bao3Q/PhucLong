@@ -3,12 +3,13 @@
         {
             "ssh": "Disabled",
             "previewLimit": 50,
-            "server": "127.0.0.1",
-            "port": 5432,
+            "server": "localhost",
+            "port": 5433,
             "driver": "PostgreSQL",
-            "database": "phuclong_db",
             "name": "phuclong_db",
-            "username": "postgres"
+            "database": "phuclong_db",
+            "username": "postgres",
+            "password": "postgres"
         }
     ]
 }
