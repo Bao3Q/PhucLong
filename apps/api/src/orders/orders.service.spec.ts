@@ -113,6 +113,26 @@ describe('OrdersService (nhánh in-memory, không cần DB)', () => {
       expect(orders).toHaveLength(2);
       expect(orders[0].id).toBeGreaterThan(orders[1].id);
     });
+
+    it('chỉ trả đơn của chính mình, không lẫn đơn người khác', async () => {
+      const stranger: AuthUser = { id: 'other-user-id', role: 'CUSTOMER' };
+      const mine = await service.createOrder(user, { items: [{ ...item, qty: 1 }] });
+      await service.createOrder(stranger, { items: [{ ...item, qty: 1 }] });
+      const orders = await service.findMyOrders(user.id);
+      expect(orders.map((o) => o.id)).toEqual([mine.id]);
+    });
+
+    it('người chưa có đơn nhận danh sách rỗng', async () => {
+      await expect(service.findMyOrders('no-orders-user')).resolves.toEqual([]);
+    });
+
+    it('mỗi đơn có mã hiển thị, số món và giờ tạo dạng ISO', async () => {
+      await service.createOrder(user, { items: [item] });
+      const [order] = await service.findMyOrders(user.id);
+      expect(order.code).toBe(`#${order.id}`);
+      expect(order.itemCount).toBe(2);
+      expect(() => new Date(order.createdAt).toISOString()).not.toThrow();
+    });
   });
 
   describe('máy trạng thái', () => {
