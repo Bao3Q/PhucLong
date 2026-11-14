@@ -1,137 +1,176 @@
-@startuml
+@startuml Task2_3_Class
 skinparam backgroundColor white
 skinparam monochrome true
 skinparam shadowing false
 skinparam roundCorner 0
 skinparam defaultFontName DejaVu Sans
-skinparam defaultFontSize 15
+skinparam defaultFontSize 14
 skinparam classAttributeIconSize 0
-skinparam classBackgroundColor white
-skinparam classBorderColor black
-skinparam ArrowColor black
-skinparam nodesep 70
-skinparam ranksep 70
+skinparam nodesep 55
+skinparam ranksep 55
 skinparam dpi 180
 hide circle
 
-title BREWLITE - CLASS DIAGRAM\nTask 2.3 | Mô hình domain theo ký hiệu UML trong Chương 5
+title BREWLITE - CLASS DIAGRAM (Task 2.3)\nMô hình domain khớp Prisma schema (apps/api/prisma/schema.prisma)
 
 class User {
- - id : UUID
- - fullName : String
- - email : String
- - passwordHash : String
- - role : UserRole
- + updateProfile(name : String) : void
- + hasRole(role : UserRole) : Boolean
+  - id : UUID
+  - email : String
+  - passwordHash : String
+  - role : UserRole
+  - loyaltyPoints : Integer
+  - createdAt : DateTime
+  + hasRole(role : UserRole) : Boolean
 }
 class Order {
- - id : UUID
- - checkoutKey : String
- - createdAt : DateTime
- - status : OrderStatus
- - subtotal : Decimal
- - discountAmount : Decimal
- - totalAmount : Decimal
- + calculateTotal() : Decimal
- + applyPromotion(p : Promotion) : void
- + confirmPayment() : void
- + changeStatus(next : OrderStatus) : void
- + cancel() : void
+  - id : Integer
+  - userId : UUID
+  - status : OrderStatus
+  - subtotal : Integer
+  - discountAmount : Integer
+  - voucherCode : String [0..1]
+  - total : Integer
+  - createdAt : DateTime
+  + calculateTotal() : Integer
+  + applyPromotion(p : Promotion) : void
+  + changeStatus(next : OrderStatus) : void
 }
 class OrderItem {
- - id : UUID
- - productNameSnapshot : String
- - sizeSnapshot : String
- - toppingsSnapshot : List<String>
- - unitPriceSnapshot : Decimal
- - quantity : Integer
- + calculateSubtotal() : Decimal
+  - id : Integer
+  - productName : String
+  - size : ProductSize
+  - toppings : List<String>
+  - note : String [0..1]
+  - qty : Integer
+  - unitPrice : Integer
+  - lineTotal : Integer
+  + calculateLineTotal() : Integer
 }
 class Product {
- - id : UUID
- - name : String
- - basePrice : Decimal
- - availableStock : Integer
- - isActive : Boolean
- + isAvailable(quantity : Integer) : Boolean
- + reserveStock(quantity : Integer) : void
- + releaseStock(quantity : Integer) : void
+  - id : String cuid
+  - name : String
+  - price : Integer
+  - imageUrl : String
+  - description : String [0..1]
+  - tag : String [0..1]
+  - stock : Integer
+  - version : Integer
+  + isAvailable() : Boolean
 }
 class Payment {
- - id : UUID
- - idempotencyKey : String
- - requestHash : String
- - amount : Decimal
- - method : PaymentMethod
- - status : PaymentStatus
- - providerRef : String [0..1]
- + markSucceeded(reference : String) : void
- + markFailed() : void
- + isFinal() : Boolean
+  - id : Integer
+  - method : String momo|card
+  - success : Boolean
+  - idempotencyKey : String [0..1]
+  - requestFingerprint : String
+  - result : Json
+  - amount : Integer
+  - createdAt : DateTime
+  + isFinal() : Boolean
 }
 class Promotion {
- - id : UUID
- - code : String
- - discountRate : Decimal
- - startsAt : DateTime
- - endsAt : DateTime
- - isActive : Boolean
- + isValid(at : DateTime) : Boolean
- + calculateDiscount(subtotal : Decimal) : Decimal
+  - code : String PK unique
+  - name : String
+  - discountType : DiscountType
+  - discountValue : Integer
+  - maxDiscountAmount : Integer [0..1]
+  - minOrderAmount : Integer
+  - usageLimit : Integer [0..1]
+  - usedCount : Integer
+  - isActive : Boolean
+  - startsAt : DateTime
+  - endsAt : DateTime [0..1]
+  + calculateDiscount(subtotal : Integer) : Integer
+  + isValid(at : DateTime) : Boolean
 }
 class LoyaltyTransaction {
- - id : UUID
- - pointsDelta : Integer
- - reason : String
- - createdAt : DateTime
- + isEarn() : Boolean
- + isRedeem() : Boolean
+  - id : Integer
+  - type : LoyaltyTransactionType
+  - points : Integer
+  - balanceAfter : Integer
+  - description : String [0..1]
+  - createdAt : DateTime
+}
+class RecipeItem {
+  - id : Integer
+  - productId : String
+  - size : ProductSize
+  - ingredientId : Integer
+  - amount : Decimal
+}
+class Ingredient {
+  - id : Integer
+  - name : String unique
+  - quantity : Decimal
+  - unit : String
+}
+class Cup {
+  - id : Integer
+  - size : ProductSize unique
+  - quantity : Integer
 }
 
 User "1" -right- "0..*" Order : đặt
 Order "1" *-right- "1..*" OrderItem : gồm
-OrderItem "0..*" -down- "1" Product : tham chiếu
-Order "1" -down- "0..1" Payment : thanh toán
-Promotion "0..1" -up- "0..*" Order : áp dụng cho
+OrderItem "0..*" -down- "1" Product : thuộc món
+User "1" -down- "0..*" Payment : thực hiện
+Order "1" -down- "0..*" Payment : thanh toán\n(mỗi lần thử 1 bản ghi)
+Order "0..*" -down- "0..1" Promotion : áp dụng voucher
 User "1" -down- "0..*" LoyaltyTransaction : sở hữu
-LoyaltyTransaction "0..*" -- "0..1" Order : phát sinh từ
-
-Promotion -[hidden]right- Payment
-Payment -[hidden]right- Product
-LoyaltyTransaction -[hidden]right- Promotion
+Order "0..1" -left- "0..*" LoyaltyTransaction : phát sinh điểm
+Product "1" -down- "0..*" RecipeItem : công thức
+Ingredient "1" -right- "0..*" RecipeItem : dùng
 
 together {
- enum UserRole <<enumeration>> {
-  CUSTOMER
-  STAFF
-  MANAGER
- }
- enum OrderStatus <<enumeration>> {
-  PENDING_PAYMENT
-  CONFIRMED
-  PREPARING
-  READY
-  COMPLETED
-  CANCELLED
- }
- enum PaymentStatus <<enumeration>> {
-  PENDING
-  SUCCEEDED
-  FAILED
- }
- enum PaymentMethod <<enumeration>> {
-  WALLET
-  CARD
- }
+  enum UserRole <<enumeration>> {
+    CUSTOMER
+    ADMIN
+  }
+  enum ProductSize <<enumeration>> {
+    S
+    M
+    L
+  }
+  enum OrderStatus <<enumeration>> {
+    PENDING
+    PAID
+    PAYMENT_FAILED
+    PREPARING
+    READY
+    COMPLETED
+    CANCELLED
+  }
+  enum DiscountType <<enumeration>> {
+    PERCENT
+    FIXED
+  }
+  enum LoyaltyTransactionType <<enumeration>> {
+    EARN
+    REDEEM
+    ADJUST
+    EXPIRE
+  }
 }
-LoyaltyTransaction -[hidden]down- UserRole
-Promotion -[hidden]down- OrderStatus
-Payment -[hidden]down- PaymentStatus
-Product -[hidden]down- PaymentMethod
-UserRole -[hidden]right- OrderStatus
-OrderStatus -[hidden]right- PaymentStatus
-PaymentStatus -[hidden]right- PaymentMethod
 
+note right of Payment
+  DB thật (hợp đồng team thanh toán):
+  method TEXT, success BOOLEAN, result JSONB
+  — không dùng enum PaymentMethod/PaymentStatus
+  như thiết kế ban đầu trong schema.sql
+end note
+note bottom of Cup
+  Tồn kho ly theo size,
+  trừ mỗi lần thanh toán thành công
+end note
+
+Cup -[hidden]right- Ingredient
+LoyaltyTransaction -[hidden]down- UserRole
+Promotion -[hidden]down- DiscountType
+Payment -[hidden]down- OrderStatus
+Product -[hidden]down- ProductSize
+UserRole -[hidden]right- ProductSize
+ProductSize -[hidden]right- OrderStatus
+OrderStatus -[hidden]right- DiscountType
+DiscountType -[hidden]right- LoyaltyTransactionType
 
 @enduml
