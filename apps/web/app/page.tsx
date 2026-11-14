@@ -123,7 +123,7 @@ export default function Home() {
 
         <div className="flex items-center space-x-6 text-sm font-semibold text-stone-600">
           <span className="text-[#006A32] font-bold border-b-2 border-[#006A32] pb-0.5 cursor-pointer">Menu Đồ Uống</span>
-          <span className="cursor-pointer hover:text-stone-900 transition">Lịch sử đơn</span>
+          <button onClick={() => router.push('/orders')} className="cursor-pointer hover:text-stone-900 transition">Lịch sử đơn</button>
           <AuthButton />
 
           <button

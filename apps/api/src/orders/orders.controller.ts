@@ -13,6 +13,7 @@ import type { Request } from 'express';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
+import { toOrderResponse } from './dto/order-response.dto';
 import { JwtAuthGuard } from '../common/auth/jwt-auth.guard';
 import type { AuthUser } from '../common/auth/auth-user.interface';
 
@@ -37,14 +38,15 @@ export class OrdersController {
     return this.ordersService.findMyOrders(request.user.id);
   }
 
-  // Xem chi tiết đơn cần đăng nhập; chỉ chủ đơn hoặc ADMIN được xem (người khác → 403)
+  // Task 9 – màn hình xác nhận đơn. Cần đăng nhập; chỉ chủ đơn hoặc ADMIN được xem (người khác → 403).
+  // Trả qua toOrderResponse (mã đơn "#id", trạng thái, món, tiền) — không lộ userId/dữ liệu nội bộ.
   @Get(':id')
   @UseGuards(JwtAuthGuard)
   async getById(
     @Req() request: Request & { user: AuthUser },
     @Param('id') id: string,
   ) {
-    return this.ordersService.findOne(id, request.user);
+    return toOrderResponse(await this.ordersService.findOne(id, request.user));
   }
 
   // Chuyển trạng thái đơn (chủ đơn hoặc ADMIN); sai bước chuyển → 400
