@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { OrderStatus, ProductSize, UserRole } from '../generated/prisma/client';
+import { OrderStatus, Prisma, ProductSize, UserRole } from '../generated/prisma/client';
 import type { AuthUser } from '../common/auth/auth-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { Order, OrderItem } from './orders.data';
@@ -93,6 +93,7 @@ export class OrdersService {
   async updateStatus(
     id: string | number,
     status: 'PAID' | 'PAYMENT_FAILED',
+    tx?: Prisma.TransactionClient,
   ): Promise<Order> {
     const orderId = Number(id);
     if (!Number.isInteger(orderId)) {
@@ -100,7 +101,7 @@ export class OrdersService {
     }
 
     try {
-      const order = await this.prisma.order.update({
+      const order = await (tx ?? this.prisma).order.update({
         where: { id: orderId },
         data: { status: status as OrderStatus },
         include: { items: true },
