@@ -15,5 +15,5 @@ coverage
 **/.env
 **/.env.*
 *.log
-*.tsbuildinfo
+**/*.tsbuildinfo
 apps/api/src/generated
