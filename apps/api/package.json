@@ -9,7 +9,9 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "pretest": "prisma generate",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "pretest:e2e": "prisma generate",
+    "test:e2e": "jest --config ../../tests/api/jest-e2e.config.js --runInBand"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

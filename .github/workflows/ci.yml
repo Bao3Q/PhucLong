@@ -1,10 +1,15 @@
 name: BrewLite CI Pipeline
 
+# Quality gate: Install → Lint → Unit Test → (Integration / E2E) → Build.
+# Chạy khi mở/cập nhật pull request và khi push lên main/develop.
+# cd.yml gọi lại workflow này (workflow_call) trước khi deploy production.
 on:
   pull_request:
     branches: [ main, develop ]
   push:
-    branches: [ main, develop ]
+    # main đã có cd.yml (gọi lại workflow này) — tránh chạy trùng
+    branches: [ develop ]
+  workflow_call:
 
 jobs:
   web-ci:
@@ -33,14 +38,34 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: http://localhost:4000
 
+  web-test:
+    name: Frontend Unit Test (Vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tests/web
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install test dependencies
+        run: npm install
+
+      - name: Unit + component test
+        run: npm test
+
   api-ci:
     name: Backend CI (NestJS)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/api
-    # Postgres thật cho bước migration + integration test (không còn chỉ
-    # test in-memory — transaction SQL thật được kiểm tra trong CI).
+    # Postgres thật cho bước migration + integration test (tests/api).
     services:
       postgres:
         image: postgres:16-alpine
@@ -73,8 +98,100 @@ jobs:
       - name: Apply migrations
         run: npx prisma migrate deploy
 
-      - name: Unit + Integration Test
+      - name: Unit Test
         run: npm run test
+
+      - name: Integration Test (HTTP + PostgreSQL)
+        run: npm run test:e2e
 
       - name: Build
         run: npm run build
+
+  e2e:
+    name: E2E Test (Playwright – menu → xác nhận đơn)
+    runs-on: ubuntu-latest
+    needs: [ web-ci, api-ci ]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: phuclong
+          POSTGRES_PASSWORD: phuclong_password
+          POSTGRES_DB: phuclong_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U phuclong -d phuclong_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://phuclong:phuclong_password@localhost:5432/phuclong_e2e?schema=public
+      JWT_SECRET: ci_e2e_secret
+      CORS_ORIGIN: http://localhost:3000
+      PORT: 4000
+      # Web gọi same-origin /api/* rồi Next.js proxy sang API (next.config.ts)
+      API_PROXY_TARGET: http://localhost:4000
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies (workspaces)
+        run: npm install
+
+      - name: Migrate + build API
+        working-directory: apps/api
+        run: |
+          npx prisma migrate deploy
+          npm run build
+
+      - name: Start API
+        working-directory: apps/api
+        run: |
+          nohup node dist/main > ../../api.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:4000/health && exit 0
+            sleep 2
+          done
+          cat ../../api.log; exit 1
+
+      - name: Build + start Web
+        working-directory: apps/web
+        run: |
+          npm run build
+          nohup npm run start -- -p 3000 > ../../web.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -fsS -o /dev/null http://localhost:3000 && exit 0
+            sleep 2
+          done
+          cat ../../web.log; exit 1
+
+      - name: Install Playwright
+        working-directory: tests/e2e
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: Run E2E
+        working-directory: tests/e2e
+        run: npx playwright test
+        env:
+          E2E_BASE_URL: http://localhost:3000
+          E2E_API_URL: http://localhost:4000
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            tests/e2e/playwright-report
+            tests/e2e/test-results
+            api.log
+            web.log
+          retention-days: 7
