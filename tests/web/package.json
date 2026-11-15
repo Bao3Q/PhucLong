@@ -1,0 +1,18 @@
+{
+  "name": "phuclong-web-tests",
+  "private": true,
+  "description": "Unit/component test cho frontend (Vitest + Testing Library). Package riêng ngoài npm workspaces để không đụng package-lock.json gốc mà Dockerfile dùng với npm ci.",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "10.4.0",
+    "@testing-library/react": "16.1.0",
+    "jsdom": "25.0.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "vitest": "2.1.8",
+    "zustand": "5.1.0"
+  }
+}

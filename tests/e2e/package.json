@@ -1,0 +1,12 @@
+{
+  "name": "phuclong-e2e",
+  "private": true,
+  "description": "E2E test (Playwright) luồng menu → giỏ hàng → đăng nhập → thanh toán → xác nhận đơn. Package riêng, không thuộc npm workspaces nên không ảnh hưởng package-lock.json gốc.",
+  "scripts": {
+    "test": "playwright test",
+    "install:browsers": "playwright install --with-deps chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.1"
+  }
+}

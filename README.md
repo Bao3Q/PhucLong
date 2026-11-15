@@ -13,11 +13,19 @@ PhucLong/
 │   ├── requirements/      # SRS & Phạm vi
 │   ├── diagrams/          # Activity, Sequence, Class Diagrams (.puml & .svg)
 │   ├── architecture/      # Kiến trúc, ADRs
+│   ├── release-notes/     # Release notes từng phiên bản
+│   ├── sprints/           # Sprint Review & Retrospective
+│   ├── deployment.md      # Môi trường, pipeline CD, secret, rollback
 │   └── traceability-matrix.md # Ma trận truy vết
+├── tests/                 # Integration (api), E2E (e2e), unit frontend (web)
 ├── .github/
-│   └── workflows/ci.yml   # CI Pipeline
-├── Dockerfile             # Đóng gói toàn bộ monorepo (demo local)
+│   └── workflows/
+│       ├── ci.yml         # CI: lint, unit, integration, E2E, build
+│       └── cd.yml         # CD: image → GHCR → migrate → deploy → smoke test → rollback
+├── Dockerfile.api         # Image production API (Render)
+├── Dockerfile.web         # Image web (docker compose local)
 ├── docker-compose.yml     # Chạy local: Web + API + PostgreSQL
+├── CHANGELOG.md           # Lịch sử phiên bản
 ├── .env.example           # Biến môi trường mẫu
 └── README.md
 ```
@@ -106,19 +114,16 @@ Test nhanh bằng Thunder Client / Postman (API ở `http://localhost:4000`):
 
 ## 3. Kiểm thử (Test)
 
-| Lệnh | Nơi chạy | Mô tả |
+| Lệnh (chạy ở thư mục gốc) | Loại | Cần gì |
 | --- | --- | --- |
-| `npm run lint` | `apps/web` | ESLint cho frontend |
-| `npm run test` | root (hoặc `apps/api`) | Unit test API (Jest) — toàn bộ test hiện nằm ở backend |
+| `npm --prefix apps/web run lint` | ESLint frontend | — |
+| `npm run test` | Unit test API (Jest, in-memory) | — |
+| `npm run test:e2e:api` | Integration test API: HTTP + PostgreSQL thật (`tests/api`) | `DATABASE_URL` tới DB đã migrate |
+| `npm run test:web` | Unit/component test frontend (Vitest, `tests/web`) | — |
+| `npm run test:e2e` | E2E Playwright menu → xác nhận đơn (`tests/e2e`) | web :3000 + API :4000 đang chạy |
 
-```bash
-npm run test                          # chạy toàn bộ unit test API
-npm --prefix apps/web run lint        # lint frontend
-```
-
-Kết quả tham chiếu trước Task 9: **66/66 test pass** (7 test suites: auth, orders, payments, products, rbac, jwt-guard, health). Task 9 thêm `orders.controller.spec.ts` (4 test) và 3 test lịch sử đơn trong `orders.service.spec.ts`.
-
-> Ghi chú: Frontend chưa có unit/E2E test tự động — nằm trong kế hoạch Sprint 2 (Task 5.2: integration test cho tạo đơn/thanh toán và 1 E2E test luồng menu → xác nhận đơn).
+Chi tiết từng loại và cách chạy: [`tests/README.md`](tests/README.md). Mã test (API-T, INT-T, WEB-T, E2E-T) khớp [ma trận truy vết](docs/traceability-matrix.md).
+CI (`.github/workflows/ci.yml`) chạy toàn bộ các bước trên ở mỗi pull request; PR chỉ được merge khi tất cả xanh.
 
 ## 4. Build
 
@@ -140,11 +145,12 @@ cd apps/api && npm run start:prod     # node dist/main
 ### 4.2 Build Docker image
 
 ```bash
-docker build -t brewlite:local .
-docker run -p 3000:3000 -p 4000:4000 --env-file .env brewlite:local
+docker build -f Dockerfile.api -t phuclong-api:local .   # image production API (giống bản trên Render)
+docker build -f Dockerfile.web -t phuclong-web:local .
+docker compose up -d --build                             # hoặc build + chạy cả 3 service
 ```
 
-> Lưu ý: image hiện tại chạy **chế độ dev** (cả Web + API trong một container, dùng cho demo local). Image production riêng cho API trên Render nằm trong checklist mục 6.
+Image API do pipeline CD build được đẩy lên `ghcr.io/bao3q/phuclong-api` với tag `sha-<commit>`, `latest` và `X.Y.Z` (khi gắn tag phiên bản).
 
 ---
 
@@ -159,14 +165,28 @@ docker run -p 3000:3000 -p 4000:4000 --env-file .env brewlite:local
 
 Chi tiết lựa chọn nền tảng: [ADR-004](docs/architecture/adr/004-render-vercel-neon.md).
 
+### 5.1 Pipeline CI/CD
+
+```
+Push/Tag → Lint & Test → Build → Docker Image → Push Registry → Deploy → Smoke Test
+```
+
+- **CI** (`ci.yml`) – mỗi pull request: lint, unit test API + web, integration test API (PostgreSQL), E2E Playwright, build.
+- **CD** (`cd.yml`) – push `main` hoặc tag `vX.Y.Z`: chạy lại CI → build image tag commit SHA → push GHCR → `prisma migrate deploy` → deploy Render bằng secret → smoke test (`/health`, `/products`, CORS, web) → lỗi thì rollback và dừng pipeline → tag thì tạo GitHub Release.
+- Secret cần tạo, thiết lập lần đầu và cách phát hành phiên bản: [`docs/deployment.md`](docs/deployment.md).
+
 ---
 
 ## 6. Checklist cần hoàn thiện trước khi go-live
 
-- [ ] **Dockerfile production cho API**: image hiện tại là dev-mode (`CMD npm run dev` chạy cả Web + API). Cần image chỉ chứa API: build `nest build` rồi `CMD ["node", "dist/main"]`.
-- [x] **Endpoint `GET /health`** (theo NFR-04): đã triển khai — trả 200 `{"status":"ok","database":"up"}` khi DB sẵn sàng, 503 khi DB mất. Smoke test: `curl https://phuclong-kf14.onrender.com/health` (cần redeploy API lên Render để có trên production).
-- [ ] **CD pipeline** (Task 5.3): quality gate → build image tag theo commit SHA → push registry → deploy → health check → tự rollback khi thất bại.
-- [ ] **Secrets** chỉ đặt trong dashboard Render/Vercel/Neon, không commit vào repo, không in ra log CI.
+- [x] **Dockerfile production cho API**: `Dockerfile.api` multi-stage, chạy `prisma migrate deploy && node dist/main` bằng user `node`.
+- [x] **Endpoint `GET /health`** (NFR-04): 200 `{"status":"ok","database":"up"}` khi DB sẵn sàng, 503 khi DB mất.
+- [x] **CD pipeline** (Task 5.3): `.github/workflows/cd.yml`.
+- [ ] **Cấu hình secret cho CD** trên GitHub (`RENDER_DEPLOY_HOOK_URL`, `RENDER_API_KEY`, `RENDER_SERVICE_ID`, `PROD_DATABASE_URL`) – xem `docs/deployment.md` mục 3.
+- [ ] **CORS production**: Render `CORS_ORIGIN=https://phuc-long-omega.vercel.app` (hoặc web dùng proxy `API_PROXY_TARGET`).
+- [ ] **Branch protection** cho `main`: bắt buộc PR + check CI xanh.
+- [ ] **Gắn tag `v1.0.0`** để tạo release (`docs/release-notes/v1.0.0.md`).
+- [x] **Secrets** chỉ đặt trong dashboard Render/Vercel/Neon và GitHub Secrets, không commit vào repo.
 
 ---
 
@@ -221,3 +241,25 @@ Nếu một bước thất bại, transaction tự rollback các thay đổi dat
 | Web vẫn gọi API localhost sau khi deploy | `NEXT_PUBLIC_API_URL` là biến build-time — đổi env trên Vercel xong phải **Redeploy**. |
 | `docker compose up` báo lỗi `.env.example` không tồn tại | Chạy lệnh từ thư mục root của monorepo, không chạy trong `apps/*`. |
 | Đăng nhập báo 401 sau khi đổi `JWT_SECRET` | Token cũ ký bằng secret cũ — đăng nhập lại để nhận token mới. |
+
+---
+
+## 9. Quy trình làm việc nhóm
+
+### 9.1 Nhánh và pull request
+- `main` luôn deploy được; không push thẳng – mọi thay đổi qua pull request, CI phải xanh mới được merge.
+- Nhánh tính năng tách từ `main`: `feature/<task>-<mô-tả>` (vd. `feature/task9`), sửa lỗi `fix/<mô-tả>`, tài liệu `docs/<mô-tả>`.
+- PR ghi rõ: task/issue liên quan, thay đổi gì, cách test; ít nhất 1 thành viên khác review.
+
+### 9.2 Quy ước commit
+Theo Conventional Commits: `<loại>(<phạm vi>): <mô tả>` – loại: `feat`, `fix`, `docs`, `test`, `ci`, `chore`, `refactor`.
+Ví dụ: `feat(task9): man hinh xac nhan don`, `fix(api): kiem tra CORS`, `ci: them buoc E2E`.
+
+### 9.3 Definition of Done
+Một hạng mục chỉ được coi là xong khi:
+1. Code đã merge vào `main` qua PR có review, CI xanh (lint, test, build).
+2. Có test cho logic mới (unit; integration/E2E nếu đụng API hoặc luồng chính).
+3. Đáp ứng tiêu chí chấp nhận của yêu cầu (FR/NFR) tương ứng.
+4. Cập nhật tài liệu liên quan: README, `docs/traceability-matrix.md` (mã yêu cầu ↔ code ↔ test), sơ đồ nếu thay đổi thiết kế.
+5. Đã deploy và smoke test production đạt (với thay đổi lên `main`).
+
