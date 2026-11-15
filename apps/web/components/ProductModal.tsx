@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Product, ProductOption, CartItem } from '@/app/types';
+import { CartItem } from '@/lib/cart';
+import { cartItemId } from '@/lib/cart';
+import { Product, ProductOption } from '@/app/types';
 
 interface ProductModalProps {
   isOpen: boolean;
@@ -27,19 +29,20 @@ export default function ProductModal({ isOpen, onClose, product, onAddToCart }: 
 
   if (!isOpen || !product) return null;
 
-  // Logic giá mới: Size S là giá gốc, M +5k, L +10k
-  const getSizeAdjustment = () => {
-    if (size === 'M') return 5000;
-    if (size === 'L') return 10000;
-    return 0; // Size S
+  // Giá hiển thị đọc từ bảng size do API trả về (khớp SIZE_SURCHARGE phía server),
+  // có fallback đúng bằng hằng số cũ nếu API không gửi sizes.
+  const sizePriceDelta = (key: 'S' | 'M' | 'L') => {
+    const option = product.sizes?.find((s) => s.name.startsWith(`Size ${key}`));
+    return option?.price ?? (key === 'M' ? 5000 : key === 'L' ? 10000 : 0);
   };
 
   const toppingTotal = selectedToppings.reduce((total, topping) => total + topping.price, 0);
-  const unitPrice = product.basePrice + getSizeAdjustment() + toppingTotal;
+  const unitPrice = product.basePrice + sizePriceDelta(size) + toppingTotal;
   const totalPrice = unitPrice * quantity;
 
   const handleConfirm = () => {
     onAddToCart({
+      id: cartItemId(product.id, size, selectedToppings),
       product,
       size,
       toppings: selectedToppings,
@@ -81,8 +84,8 @@ export default function ProductModal({ isOpen, onClose, product, onAddToCart }: 
               <div className="grid grid-cols-3 gap-2">
                 {[
                   { key: 'S', label: 'S', desc: 'Giá gốc' },
-                  { key: 'M', label: 'M', desc: '+5.000đ' },
-                  { key: 'L', label: 'L', desc: '+10.000đ' },
+                  { key: 'M', label: 'M', desc: `+${sizePriceDelta('M').toLocaleString('vi-VN')}đ` },
+                  { key: 'L', label: 'L', desc: `+${sizePriceDelta('L').toLocaleString('vi-VN')}đ` },
                 ].map((item) => (
                   <button
                     key={item.key}

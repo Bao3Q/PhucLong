@@ -1,8 +1,6 @@
 services:
   postgres:
     image: postgres:16-alpine
-    env_file:
-      - .env
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -17,46 +15,51 @@ services:
       timeout: 5s
       retries: 10
 
-  app:
+  backend:
     build:
       context: .
-      dockerfile: Dockerfile
-    working_dir: /workspace
-    command:
-      - sh
-      - -c
-      - >-
-        cd apps/api &&
-        npx prisma generate &&
-        npx prisma migrate deploy &&
-        cd ../.. &&
-        npm run dev:docker
-    env_file:
-      - .env
+      dockerfile: Dockerfile.api
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-phuclong_db}?schema=public"
       PORT: ${PORT:-4000}
-      NODE_ENV: ${NODE_ENV:-development}
+      NODE_ENV: production
       JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-key-for-brewlite-project-2026}
       JWT_EXPIRATION: ${JWT_EXPIRATION:-1d}
+      # CORS whitelist — frontend chạy ở http://localhost:3000
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+      ORDER_PENDING_TTL_MINUTES: ${ORDER_PENDING_TTL_MINUTES:-10}
+      SEPAY_ACC: ${SEPAY_ACC:-}
+      SEPAY_BANK: ${SEPAY_BANK:-}
+      SEPAY_API_KEY: ${SEPAY_API_KEY:-}
+      SEPAY_TIMEOUT_SECONDS: ${SEPAY_TIMEOUT_SECONDS:-120}
     ports:
-      - "3000:3000"
-      - "${PORT:-4000}:${PORT:-4000}"
+      - "${PORT:-4000}:4000"
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - .:/workspace
-      - root_node_modules:/workspace/node_modules
-      - api_node_modules:/workspace/apps/api/node_modules
-      - web_node_modules:/workspace/apps/web/node_modules
-      - web_next:/workspace/apps/web/.next
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:4000/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment:
+      # Client gọi same-origin /api/* → proxy sang backend (không cần CORS)
+      API_PROXY_TARGET: http://backend:4000
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres_data:
-  root_node_modules:
-  api_node_modules:
-  web_node_modules:
-  web_next:

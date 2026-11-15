@@ -2,22 +2,11 @@
 
 import React, { Suspense, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import SiteHeader from '@/components/SiteHeader';
+import { login, register } from '@/lib/api';
 import { safeNextPath, setToken } from '@/lib/auth';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-
 type Mode = 'login' | 'register';
-
-/** Lấy thông báo lỗi từ backend (message có thể là chuỗi hoặc mảng). */
-async function errorMessage(res: Response, fallback: string): Promise<string> {
-  try {
-    const body = await res.json();
-    const msg = Array.isArray(body.message) ? body.message[0] : body.message;
-    return typeof msg === 'string' ? msg : fallback;
-  } catch {
-    return fallback;
-  }
-}
 
 function LoginForm() {
   const router = useRouter();
@@ -31,37 +20,28 @@ function LoginForm() {
 
   const isLogin = mode === 'login';
 
-  async function post(path: string) {
-    return fetch(`${API_BASE_URL}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-  }
-
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
       if (!isLogin) {
-        const reg = await post('/auth/register');
+        const reg = await register(email, password);
         if (!reg.ok) {
           setError(
-            reg.status === 409
+            reg.kind === 'conflict'
               ? 'Email này đã được đăng ký. Hãy đăng nhập.'
-              : await errorMessage(reg, 'Đăng ký thất bại'),
+              : reg.message,
           );
           return;
         }
       }
-      const res = await post('/auth/login');
+      const res = await login(email, password);
       if (!res.ok) {
-        setError(await errorMessage(res, 'Đăng nhập thất bại'));
+        setError(res.message);
         return;
       }
-      const data = await res.json();
-      setToken(data.accessToken);
+      setToken(res.data.accessToken);
       router.push(next);
     } catch {
       setError('Không kết nối được máy chủ. Vui lòng thử lại.');
@@ -148,18 +128,9 @@ function LoginForm() {
 }
 
 export default function LoginPage() {
-  const router = useRouter();
   return (
     <div className="min-h-screen bg-[#F7F6F2] text-gray-900">
-      <header className="bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center">
-        <div className="flex items-center space-x-2 cursor-pointer" onClick={() => router.push('/')}>
-          <span className="bg-[#006A32] text-white px-2.5 py-1 rounded-md font-bold text-sm">PL</span>
-          <span className="font-bold tracking-wider text-gray-900">PHÚC LONG</span>
-        </div>
-        <button onClick={() => router.push('/')} className="text-sm font-semibold text-[#006A32]">
-          ← Quay lại menu
-        </button>
-      </header>
+      <SiteHeader />
       <main className="mx-auto w-full max-w-md px-4 py-10">
         {/* useSearchParams cần Suspense khi build production */}
         <Suspense fallback={null}>
