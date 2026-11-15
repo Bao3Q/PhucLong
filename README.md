@@ -264,3 +264,61 @@ Một hạng mục chỉ được coi là xong khi:
 4. Cập nhật tài liệu liên quan: README, `docs/traceability-matrix.md` (mã yêu cầu ↔ code ↔ test), sơ đồ nếu thay đổi thiết kế.
 5. Đã deploy và smoke test production đạt (với thay đổi lên `main`).
 
+---
+
+## 10. Danh mục API endpoint
+
+Toàn bộ **19 endpoint** của API (NestJS, `apps/api`). API không có prefix chung — route chạy ở root `/`.
+
+Quy ước cột **Xác thực**:
+- **Công khai** — không cần token.
+- **JWT** — cần header `Authorization: Bearer <token>`; thiếu/sai token → **401**.
+- **JWT + ADMIN** — cần JWT và vai trò ADMIN; user CUSTOMER → **403**.
+- **Webhook** — xác thực bằng khóa API của SePay (`SepayWebhookGuard`), không phải JWT.
+
+### Xác thực & sức khỏe
+
+| Method | Đường dẫn | Xác thực | Mô tả |
+| --- | --- | --- | --- |
+| POST | `/auth/register` | Công khai | Đăng ký tài khoản (mặc định CUSTOMER); trùng email → 409 |
+| POST | `/auth/login` | Công khai | Đăng nhập, trả `accessToken`; sai mật khẩu → 401 |
+| GET | `/health` | Công khai | Trạng thái API + database: 200 khi ổn, 503 khi DB mất |
+
+### Sản phẩm (menu)
+
+| Method | Đường dẫn | Xác thực | Mô tả |
+| --- | --- | --- | --- |
+| GET | `/products` | Công khai | Danh sách menu, lọc theo `?category=` |
+| GET | `/products/:id` | Công khai | Chi tiết một món |
+| POST | `/products` | JWT + ADMIN | Thêm món mới |
+| PATCH | `/products/:id` | JWT + ADMIN | Sửa thông tin món |
+
+### Đơn hàng
+
+| Method | Đường dẫn | Xác thực | Mô tả |
+| --- | --- | --- | --- |
+| POST | `/orders` | JWT | Đặt đơn: server tự tra bảng giá tính tiền và xác nhận lại voucher; dữ liệu sai → 400 |
+| GET | `/orders/me` | JWT | Lịch sử đơn của chính mình, mới nhất trước |
+| GET | `/orders/:id` | JWT (chủ đơn hoặc ADMIN) | Chi tiết một đơn; người khác xem → 403, không có đơn → 404 |
+| PATCH | `/orders/:id/status` | JWT (chủ đơn hoặc ADMIN) | Chuyển trạng thái đơn theo luồng hợp lệ; sai bước chuyển → 400 |
+
+### Thanh toán
+
+| Method | Đường dẫn | Xác thực | Mô tả |
+| --- | --- | --- | --- |
+| POST | `/payments` | JWT (chủ đơn hoặc ADMIN) | Thanh toán momo/card hoàn tất ngay; idempotency qua header `Idempotency-Key` |
+| POST | `/payments/sepay` | JWT (chủ đơn) | Tạo phiên thanh toán SePay (QR chuyển khoản, hạn 2 phút) |
+| POST | `/payments/sepay/simulate` | JWT (chủ đơn) | Giả lập "tiền đã vào" cho demo local; tự chặn khi `NODE_ENV=production` |
+| GET | `/payments/loyalty` | JWT | Điểm tích lũy của user đang đăng nhập |
+| GET | `/payments/:orderId` | JWT (chủ đơn hoặc ADMIN) | Trạng thái phiên thanh toán theo đơn (frontend poll mỗi 3 giây) |
+| POST | `/payments/sepay/webhook` | Webhook (khóa API SePay) | Webhook SePay báo tiền vào: đối soát mã + số tiền → đơn `PAID`, trừ kho trong transaction |
+
+### Khuyến mãi & tồn kho
+
+| Method | Đường dẫn | Xác thực | Mô tả |
+| --- | --- | --- | --- |
+| POST | `/promotions/validate` | JWT | Kiểm tra voucher cho đơn chưa tạo, xem trước giảm giá (không tiêu lượt dùng) |
+| GET | `/inventory` | JWT + ADMIN | Tồn kho nguyên liệu + ly (dùng để demo/verify việc trừ kho) |
+
+Tài khoản ADMIN demo (seed sẵn trong migration `seed_admin_user`): `admin@phuclong.vn` / `Admin@123456`.
+

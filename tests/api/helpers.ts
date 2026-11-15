@@ -44,5 +44,14 @@ export async function registerAndLogin(app: INestApplication, prefix: string): P
 
 export const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 
+/** Đăng nhập bằng ADMIN được seed sẵn (migration seed_admin_user / nhánh in-memory). */
+export async function loginAdmin(app: INestApplication): Promise<string> {
+  const login = await request(app.getHttpServer())
+    .post('/auth/login')
+    .send({ email: 'admin@phuclong.vn', password: 'Admin@123456' })
+    .expect(200);
+  return login.body.accessToken as string;
+}
+
 /** Một món Cappuccino (id '1') size S — sản phẩm, ly và công thức có sẵn từ migration seed. */
 export const ONE_CAPPUCCINO = { items: [{ productId: '1', size: 'S', qty: 1, toppings: [] }] };

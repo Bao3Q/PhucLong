@@ -297,13 +297,12 @@ export function fetchLoyaltyPoints(): Promise<ApiResult<LoyaltyPoints>> {
   return request<LoyaltyPoints>('/payments/loyalty');
 }
 
-/** POST /promotions/validate — xem trước giảm giá (không tiêu lượt dùng). */
+/** POST /promotions/validate — xem trước giảm giá (không tiêu lượt dùng). Cần đăng nhập. */
 export function validateVoucher(
   code: string,
   subtotal: number,
 ): Promise<ApiResult<VoucherValidation>> {
   return request<VoucherValidation>('/promotions/validate', {
     ...jsonBody({ code, subtotal }),
-    auth: false,
   });
 }
