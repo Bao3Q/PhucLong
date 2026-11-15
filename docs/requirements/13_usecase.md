@@ -6,7 +6,7 @@
 
 ![Use-case UC-01](../diagrams/Task1_3_UseCase.svg)
 
-Nguồn: [`docs/diagrams/Task1_3_UseCase.puml`](../diagrams/Task1_3_UseCase.puml) (ảnh `.svg`/`.png` cùng thư mục; bản vẽ tay ban đầu: `13_usecase.png`). Sơ đồ toàn hệ thống: [`Task1_2_UseCase.svg`](../diagrams/Task1_2_UseCase.svg) (Task 1.2).
+Nguồn: [`docs/diagrams/Task1_3_UseCase.puml`](../diagrams/Task1_3_UseCase.puml) (ảnh `.svg`/`.png` cùng thư mục). Sơ đồ toàn hệ thống: [`Task1_2_UseCase.svg`](../diagrams/Task1_2_UseCase.svg) (Task 1.2).
 
 ## 1. Đặt đơn hàng
 
@@ -78,7 +78,7 @@ Nguồn: [`docs/diagrams/Task1_3_UseCase.puml`](../diagrams/Task1_3_UseCase.puml
 | Mã | Tại bước | Điều kiện | Xử lý |
 | --- | --- | --- | --- |
 | A1 | 3 | Client gửi lại yêu cầu với **cùng Idempotency-Key** (mất mạng, bấm hai lần) | API trả lại đúng kết quả lần đầu (cùng `transactionId`), không trừ tiền/kho lần hai. |
-| A2 | 1 | Khách chọn chuyển khoản QR SePay | `POST /payments/sepay` tạo mã QR; đơn chuyển PAID khi webhook SePay xác nhận đã nhận tiền. |
+| A2 | 1 | Khách chọn chuyển khoản QR SePay (FR-10) | `POST /payments/sepay` tạo mã QR hiệu lực 2 phút; đơn chuyển PAID khi webhook SePay xác nhận đã nhận đủ tiền; quá hạn hoặc thiếu tiền thì đơn giữ PENDING và khách có thể tạo lại mã QR (sơ đồ `Task2_1_Activity_SePay`). |
 
 **Luồng ngoại lệ**
 
@@ -96,6 +96,6 @@ Nguồn: [`docs/diagrams/Task1_3_UseCase.puml`](../diagrams/Task1_3_UseCase.puml
 | Use-case | Mã yêu cầu liên quan | Tiêu chí chấp nhận (đầu vào viết test) |
 | --- | --- | --- |
 | Đặt đơn hàng | FR-02, FR-03, FR-05, FR-08 · NFR-02 | AC-01: `POST /orders` không JWT → 401 (`jwt-auth.guard.spec.ts`, INT-T04) · AC-05: dữ liệu sai → 400, giá do server tính (INT-T04) · AC-06: đơn không tồn tại → 404 (`orders.service.spec.ts`) |
-| Thanh toán đơn hàng | FR-06, FR-07 · NFR-01, NFR-02 | AC-02: retry cùng idempotency-key không trừ trùng (`payments.service.spec.ts`, INT-T06) · AC-03: thành công → PAID + trừ kho (`payments.service.spec.ts`, INT-T05) · AC-04: thất bại → không trừ kho (`payments.service.spec.ts`) · AC-07: DB down → 503 (`health.controller.spec.ts`) · AC-08: đơn người khác → 403 (INT-T07) |
+| Thanh toán đơn hàng | FR-06, FR-07, FR-10, FR-11 · NFR-02, NFR-05 | AC-02: retry cùng idempotency-key không trừ trùng (`payments.service.spec.ts`, INT-T06) · AC-03: thành công → PAID + trừ kho (`payments.service.spec.ts`, INT-T05) · AC-04: thất bại → không trừ kho (`payments.service.spec.ts`) · AC-07: DB down → 503 (`health.controller.spec.ts`) · AC-08: đơn người khác → 403 (INT-T07) |
 
-Sơ đồ liên quan: [`Task1_3_UseCase.svg`](../diagrams/Task1_3_UseCase.svg) (use-case UC-01) · [`Task1_2_UseCase.svg`](../diagrams/Task1_2_UseCase.svg) (use-case tổng quát) · [`Task2_2_Sequence.svg`](../diagrams/Task2_2_Sequence.svg) (sequence UC-01) · [`Task2_1_Activity.svg`](../diagrams/Task2_1_Activity.svg) (activity end-to-end).
+Sơ đồ liên quan: [`Task1_3_UseCase.svg`](../diagrams/Task1_3_UseCase.svg) (use-case UC-01) · [`Task1_2_UseCase.svg`](../diagrams/Task1_2_UseCase.svg) (use-case tổng quát) · [Activity-01 `Task2_1_Activity.svg`](../diagrams/Task2_1_Activity.svg) (activity end-to-end) · [Sequence-01 `Task2_2_Sequence.svg`](../diagrams/Task2_2_Sequence.svg) (sequence UC-01, dùng các mã A/E ở trên) · [Class-01 `Task2_3_Class.svg`](../diagrams/Task2_3_Class.svg) (class domain).
