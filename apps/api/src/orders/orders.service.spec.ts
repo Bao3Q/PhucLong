@@ -8,7 +8,7 @@ import { OrdersRepository } from './orders.repository';
 import { ProductsService } from '../products/products.service';
 import type { AuthUser } from '../common/auth/auth-user.interface';
 import { OrderStatus } from './entities/order.entity';
-import { CreateOrderDto, CreateOrderItemDto, OrderSize } from './dto/create-order.dto';
+import { CreateOrderItemDto, OrderSize } from './dto/create-order.dto';
 
 const user: AuthUser = {
   id: 'test-user-id',
