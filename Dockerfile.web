@@ -11,10 +11,14 @@ RUN npm ci
 
 COPY apps/web ./apps/web
 
-# NEXT_PUBLIC_* được bake vào bundle lúc build. Để RỖNG để client gọi
-# same-origin /api/* (qua rewrite proxy của next.config.ts).
+# NEXT_PUBLIC_* và API_PROXY_TARGET đều được bake vào build output lúc build
+# (Next.js đánh giá rewrites() khi `next build`, không phải khi `next start`).
+# Mặc định trỏ sang service "backend" trong mạng compose; build local không
+# cần đặt gì vì next.config.ts tự fallback về localhost:4000 khi unset.
 ARG NEXT_PUBLIC_API_URL=""
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ARG API_PROXY_TARGET="http://backend:4000"
+ENV API_PROXY_TARGET=${API_PROXY_TARGET}
 RUN cd apps/web && npm run build && cd /workspace && npm prune --omit=dev
 
 # ---------- RUNTIME STAGE ----------
@@ -29,8 +33,8 @@ COPY --from=build /workspace/apps/web/public ./public
 COPY --from=build /workspace/apps/web/package.json ./package.json
 COPY --from=build /workspace/apps/web/next.config.ts ./next.config.ts
 
-# Proxy target đọc lúc runtime (next.config.ts rewrites) — compose trỏ sang backend.
-ENV API_PROXY_TARGET=http://localhost:4000
+# (API_PROXY_TARGET đã bake lúc build — không set lại ở runtime,
+#  việc đặt env ở compose sẽ không thay đổi được rewrite đã bake.)
 
 USER node
 EXPOSE 3000

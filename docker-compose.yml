@@ -51,9 +51,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
+      args:
+        # Proxy /api/* phải bake lúc build (Next.js đánh giá rewrites() khi build),
+        # đặt env lúc runtime sẽ không có tác dụng.
+        API_PROXY_TARGET: http://backend:4000
     environment:
       # Client gọi same-origin /api/* → proxy sang backend (không cần CORS)
-      API_PROXY_TARGET: http://backend:4000
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     ports:
       - "3000:3000"
