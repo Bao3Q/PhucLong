@@ -46,6 +46,10 @@ export default function CheckoutPage() {
   const [payStatus, setPayStatus] = useState<PayStatus>('waiting');
   const [secondsLeft, setSecondsLeft] = useState(0);
 
+  // Đang khôi phục phiên SePay còn treo lúc mount (đơn PENDING hoặc đã PAID):
+  // chờ API trả lời rồi mới quyết định render gì — tránh nháy màn "giỏ rỗng".
+  const [restoringSession, setRestoringSession] = useState(false);
+
   // Đơn còn PENDING phiên SePay → subtotal thay đổi làm mất giá trị voucher cũ.
   useEffect(() => {
     setVoucher(null);
@@ -75,6 +79,7 @@ export default function CheckoutPage() {
     const token = getToken();
     if (!pendingOrderId || !token) return;
 
+    setRestoringSession(true);
     void fetchPayment(pendingOrderId).then((res) => {
       if (!res.ok) {
         if (res.kind === 'unauthenticated') {
@@ -83,10 +88,14 @@ export default function CheckoutPage() {
         }
         // EXPIRED / FAILED / không còn phiên hợp lệ → về form trống giỏ
         localStorage.removeItem(PENDING_ORDER_KEY);
+        setRestoringSession(false);
         return;
       }
       const data = res.data;
       if (data.status === 'PAID') {
+        // Đơn đã PAID (thường là F5 lại trang sau khi chuyển khoản xong):
+        // giữ restoringSession=true để hiện màn "đang xử lý" thay vì giỏ rỗng
+        // trong lúc router chuyển sang trang thành công.
         localStorage.removeItem(PENDING_ORDER_KEY);
         router.push(`/order-success?orderId=${data.orderId}&transId=${data.transactionId}`);
       } else if (
@@ -102,8 +111,10 @@ export default function CheckoutPage() {
           expiresAt: data.expiresAt ?? '',
         });
         setPayStatus('waiting');
+        setRestoringSession(false);
       } else {
         localStorage.removeItem(PENDING_ORDER_KEY);
+        setRestoringSession(false);
       }
     });
     // Chạy đúng một lần lúc mount: session luôn null lúc này, và không được
@@ -222,6 +233,9 @@ export default function CheckoutPage() {
         const sessionData = await createSePaySession(orderData.id);
         if (!sessionData) return;
         localStorage.setItem(PENDING_ORDER_KEY, String(sessionData.orderId));
+        // Nhả isSubmitting CÙNG lúc setSession (React batch 1 lần render) —
+        // nếu nhả sớm thì form giỏ rỗng nháy lên trong lúc chờ API.
+        setIsSubmitting(false);
         setSession(sessionData);
         setPayStatus('waiting');
         return;
@@ -238,12 +252,13 @@ export default function CheckoutPage() {
         throw new Error(payRes.message);
       }
 
+      // Giữ isSubmitting=true cho tới khi trang thành công mount, tránh nháy
+      // màn giỏ rỗng trong khoảng router đang chuyển trang.
       router.push(`/order-success?orderId=${orderData.id}&transId=${payRes.data.transactionId}`);
     } catch (err: unknown) {
       console.error('Payment error:', err);
       const msg = err instanceof Error ? err.message : 'Có lỗi xảy ra trong quá trình thanh toán.';
       setErrorMessage(msg);
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -417,17 +432,28 @@ export default function CheckoutPage() {
         )}
 
         {cart.length === 0 ? (
-          <div className="bg-white p-12 rounded-3xl border border-gray-100 shadow-sm text-center space-y-4">
-            <div className="text-5xl">🛒</div>
-            <h2 className="text-xl font-bold text-gray-800">Giỏ hàng của bạn chưa có món nào</h2>
-            <p className="text-xs text-gray-500">Hãy quay lại menu để chọn món nước yêu thích nhé!</p>
-            <button
-              onClick={() => router.push('/')}
-              className="bg-[#006A32] text-white px-6 py-3 rounded-2xl font-bold text-sm shadow hover:bg-[#005227] transition"
-            >
-              Về Menu đặt món ›
-            </button>
-          </div>
+          isSubmitting || restoringSession ? (
+            // Đang tạo đơn/phiên thanh toán hoặc khôi phục phiên đã PAID:
+            // nếu render form thì giỏ rỗng nháy lên, dễ bị hiểu là bị "đẩy
+            // về giỏ hàng" — thay bằng màn xử lý cho tới khi sang màn kế.
+            <div className="bg-white p-12 rounded-3xl border border-gray-100 shadow-sm text-center space-y-4">
+              <div className="w-12 h-12 mx-auto border-4 border-[#006A32] border-t-transparent rounded-full animate-spin" />
+              <h2 className="text-xl font-bold text-gray-800">Đang xử lý thanh toán…</h2>
+              <p className="text-xs text-gray-500">Vui lòng đợi trong giây lát, đừng tắt trang này.</p>
+            </div>
+          ) : (
+            <div className="bg-white p-12 rounded-3xl border border-gray-100 shadow-sm text-center space-y-4">
+              <div className="text-5xl">🛒</div>
+              <h2 className="text-xl font-bold text-gray-800">Giỏ hàng của bạn chưa có món nào</h2>
+              <p className="text-xs text-gray-500">Hãy quay lại menu để chọn món nước yêu thích nhé!</p>
+              <button
+                onClick={() => router.push('/')}
+                className="bg-[#006A32] text-white px-6 py-3 rounded-2xl font-bold text-sm shadow hover:bg-[#005227] transition"
+              >
+                Về Menu đặt món ›
+              </button>
+            </div>
+          )
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
             {/* Cột trái: Danh sách món trong giỏ */}
