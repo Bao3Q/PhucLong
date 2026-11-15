@@ -6,7 +6,7 @@
 
 ![Use-case UC-01](../diagrams/Task1_3_UseCase.svg)
 
-Nguồn: [`docs/diagrams/Task1_3_UseCase.puml`](../diagrams/Task1_3_UseCase.puml) (ảnh `.svg`/`.png` cùng thư mục). Sơ đồ toàn hệ thống: [`Task1_2_UseCase.svg`](../diagrams/Task1_2_UseCase.svg) (Task 1.2).
+Nguồn: [`docs/diagrams/Task1_3_UseCase.puml`](../diagrams/Task1_3_UseCase.puml) (ảnh `.svg`/`.png` cùng thư mục; bản vẽ tay ban đầu: `13_usecase.png`). Sơ đồ toàn hệ thống: [`Task1_2_UseCase.svg`](../diagrams/Task1_2_UseCase.svg) (Task 1.2).
 
 ## 1. Đặt đơn hàng
 
