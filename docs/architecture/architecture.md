@@ -70,3 +70,36 @@ Frontend phân lớp rõ: `app/*/page.tsx` (route/UI) → `components/` (Product
 - **Monolith**: scale từng phần không được; nếu tách payment thành service riêng cần thêm hàng đợi/hợp đồng API.
 - **Render free tier cold start** (~30s sau idle): ảnh hưởng demo; mitigate bằng health check định kỳ.
 - **JWT stateless**: không revoke ngay được khi đổi secret/chặn user — chấp nhận, token ngắn hạn `1d`.
+
+## 7. Deployment diagram (Task 3.2)
+
+![Deployment diagram](Task3_2_Deployment.svg)
+
+Nguồn: [`Task3_2_Deployment.puml`](Task3_2_Deployment.puml) (PlantUML) · ảnh: `Task3_2_Deployment.svg`, `Task3_2_Deployment.png`. Sơ đồ chia 3 vùng: **LOCAL** (docker-compose), **CI/CD** (GitHub Actions + GHCR) và **PRODUCTION** (Vercel, Render, Neon).
+
+### Truy vết node trong sơ đồ → kiến trúc → mã nguồn
+
+| Node / artifact trong sơ đồ | Container (mục 2) | Mã nguồn / cấu hình |
+| --- | --- | --- |
+| Trình duyệt / PWA | Web | `apps/web/app/manifest.ts`, `apps/web/public/icons/` |
+| Vercel – Next.js 16 Web | Web | `apps/web/`, `Dockerfile.web` (local), biến `API_PROXY_TARGET` trong `apps/web/next.config.ts` |
+| Render – NestJS API (container Node.js 22) | API | `apps/api/src/`, `Dockerfile.api` (`EXPOSE 4000`, `prisma migrate deploy && node dist/main`) |
+| Payment Service mô phỏng | Dịch vụ thanh toán mô phỏng | `apps/api/src/payments/` |
+| `GET /health` | API | `apps/api/src/health/health.controller.ts` |
+| Neon PostgreSQL 16 | Database | `apps/api/prisma/schema.prisma`, `apps/api/prisma/migrations/` |
+| GitHub Container Registry | (CI/CD) | `.github/workflows/cd.yml` – job `image` |
+| GitHub Actions runner | (CI/CD) | `.github/workflows/ci.yml`, `.github/workflows/cd.yml` |
+| GitHub Secrets / Env Render / Env Vercel | Cấu hình (mục 4) | `.env.example`, `docs/deployment.md` mục secret |
+| docker-compose (local) | Web + API + Database | `docker-compose.yml` |
+| SePay (bên ngoài) | Dịch vụ thanh toán | `apps/api/src/payments/sepay-webhook.controller.ts` |
+
+### Giao thức và cổng
+
+| Kết nối | Giao thức / cổng |
+| --- | --- |
+| Người dùng → Vercel | HTTPS 443 |
+| Web → API (Render) | HTTPS 443, REST/JSON; chỉ domain trong `CORS_ORIGIN` được phép |
+| API → Neon | TCP 5432, TLS (`sslmode=require`); database không public trực tiếp, chỉ API và bước migration của CD có connection string |
+| CD → GHCR / Render deploy hook / smoke test | HTTPS 443 |
+| SePay → API | HTTPS 443 webhook `POST /payments/sepay/webhook` (xác thực bằng API key) |
+| Local | web `:3000`, API `:4000`, PostgreSQL `:5433` → `5432` |

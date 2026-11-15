@@ -1,7 +1,7 @@
 # Triển khai (Deployment) – BrewLite Phúc Long
 
 > Task 5.3 – Continuous Delivery/Deployment và Task 5.4 – Triển khai và bàn giao.
-> Sơ đồ: [`architecture/Task3_2_Deployment.png`](architecture/Task3_2_Deployment.png) · Quyết định nền tảng: [ADR-004](architecture/adr/004-render-vercel-neon.md).
+> Sơ đồ: [`architecture/Task3_2_Deployment.svg`](architecture/Task3_2_Deployment.svg) (nguồn [`.puml`](architecture/Task3_2_Deployment.puml)) · Quyết định nền tảng: [ADR-004](architecture/adr/004-render-vercel-neon.md).
 
 ## 1. Môi trường
 

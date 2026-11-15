@@ -117,6 +117,7 @@ Test nhanh bằng Thunder Client / Postman (API ở `http://localhost:4000`):
 | Lệnh (chạy ở thư mục gốc) | Loại | Cần gì |
 | --- | --- | --- |
 | `npm --prefix apps/web run lint` | ESLint frontend | — |
+| `npm --prefix apps/api run lint` | ESLint backend (typescript-eslint) | — |
 | `npm run test` | Unit test API (Jest, in-memory) | — |
 | `npm run test:e2e:api` | Integration test API: HTTP + PostgreSQL thật (`tests/api`) | `DATABASE_URL` tới DB đã migrate |
 | `npm run test:web` | Unit/component test frontend (Vitest, `tests/web`) | — |
