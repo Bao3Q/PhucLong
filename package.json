@@ -14,6 +14,9 @@
     "dev:web": "npm --prefix apps/web run dev",
     "build": "concurrently \"npm --prefix apps/api run build\" \"npm --prefix apps/web run build\"",
     "test": "npm --prefix apps/api run test",
+    "test:e2e:api": "npm --prefix apps/api run test:e2e",
+    "test:web": "npm --prefix tests/web install && npm --prefix tests/web test",
+    "test:e2e": "npm --prefix tests/e2e install && npm --prefix tests/e2e test",
     "install:all": "npm install && npm --prefix apps/api install && npm --prefix apps/web install"
   },
   "devDependencies": {
