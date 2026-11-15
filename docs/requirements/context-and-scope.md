@@ -26,29 +26,43 @@ Tại cửa hàng Phúc Long, khách hiện phải **xếp hàng tại quầy** 
 
 ## 3. Phạm vi MVP (in-scope)
 
+Các chức năng bắt buộc để luồng end-to-end chạy được (mức **Must** trong SRS).
+
 | # | Chức năng | Mã yêu cầu |
 | --- | --- | --- |
-| 1 | Xem menu và chi tiết món (GET /products, /products/:id) | FR-01 |
-| 2 | Chọn size S/M/L, topping động, ghi chú, số lượng; giá tự cập nhật | FR-02 |
-| 3 | Giỏ hàng lưu localStorage, sửa/xóa món, tính tổng tiền | FR-03 |
+| 1 | Xem menu theo danh mục và chi tiết món (`GET /products`, `GET /products/:id`), có trạng thái loading / empty / error | FR-01 |
+| 2 | Chọn size S/M/L, topping, ghi chú, số lượng; giá tự cập nhật | FR-02 |
+| 3 | Giỏ hàng lưu `localStorage`, sửa/xoá món, tính tổng tiền | FR-03 |
 | 4 | Đăng ký / đăng nhập, xác thực JWT | FR-04 |
-| 5 | Tạo đơn hàng (POST /orders, cần JWT), trạng thái khởi tạo PENDING | FR-05 |
-| 6 | Thanh toán Ví/Thẻ **mô phỏng** với idempotency-key; PAID / PAYMENT_FAILED; trừ tồn kho nguyên liệu + ly trong transaction | FR-06 |
-| 7 | Xem đơn: trạng thái, chi tiết item, tổng tiền (order-success) | FR-07 |
-| 8 | Quản trị menu cho ADMIN (POST /products, phân quyền RBAC), xem tồn kho (/inventory) | NFR-02 mở rộng |
-| 9 | Health check GET /health; chạy bằng docker-compose local | NFR-04 |
+| 5 | Tạo đơn hàng (`POST /orders`, cần JWT), giá do server tính, giữ tồn kho, trạng thái khởi tạo `PENDING` | FR-05 |
+| 6 | Thanh toán Ví/Thẻ **mô phỏng** với `Idempotency-Key`; thành công → `PAID` và trừ ly + nguyên liệu trong một transaction; thất bại → rollback, đơn giữ `PENDING` | FR-06 |
+| 7 | Xác nhận đơn, trạng thái và lịch sử đơn (`/orders/[id]`, `/orders`) | FR-07 |
+| 8 | Quản lý trạng thái đơn `PAID → PREPARING → READY → COMPLETED`, huỷ đơn hoàn kho | FR-09 |
+| 9 | Health check `GET /health`; chạy toàn hệ thống bằng `docker-compose` | NFR-04 |
 
-## 4. Ngoài phạm vi (out-of-scope)
+## 4. Phạm vi mở rộng (extended scope)
 
-- **Thanh toán thật**: không tích hợp cổng MoMo/VCB/VNPAY thật — chỉ service mô phỏng trong NestJS.
-- **Giao hàng / takeaway distance fee**: không có module ship, địa chỉ, phí vận chuyển.
-- **Thông báo đẩy**: không có push notification / email / SMS khi đổi trạng thái đơn (khách tự xem).
-- **Chương trình loyalty đầy đủ**: schema có `LoyaltyTransaction` nhưng MVP chưa có UI tích/điểm đổi điểm.
-- **Khuyến mãi phức tạp**: chỉ giữ được mã voucher trên đơn (FR-08 mức Could), chưa có luồng áp dụng hoàn chỉnh trên UI.
-- **Nhiều chi nhánh / multi-tenant**, phân quyền nhân viên chi tiết, báo cáo doanh thu dashboard.
-- **POS phần cứng**: in hóa đơn nhiệt, máy quét mã.
+**Đã làm thêm ngoài MVP** (không bắt buộc theo đề, mức Should/Could):
 
-## 5. Giả định (assumptions)
+| Chức năng | Mã yêu cầu | Ghi chú |
+| --- | --- | --- |
+| Mã khuyến mãi khi đặt đơn (`POST /promotions/validate`, `voucherCode`) | FR-08 | Áp dụng trên trang Checkout |
+| Thanh toán chuyển khoản QR qua SePay (webhook xác thực bằng API key) | FR-10 | Luồng thay thế A2 của UC-01b |
+| Cộng điểm thưởng khi thanh toán (1 điểm / 10.000đ, `LoyaltyTransaction` EARN) | FR-11 | Hiển thị số điểm trên trang đơn hàng |
+| Tự huỷ đơn `PENDING` quá hạn (mặc định 10 phút) và hoàn tồn kho | FR-09 | `OrderExpiryService` |
+| Quản trị sản phẩm cho ADMIN (`POST`/`PATCH /products`, RBAC), xem tồn kho nguyên liệu (`GET /inventory`) | NFR-02 | Chưa có giao diện quản trị, gọi qua API |
+
+**Có thể làm ở phiên bản sau**: màn hình quầy cho nhân viên xem đơn mới và đổi trạng thái; đổi điểm thưởng (REDEEM); giao diện quản trị menu và khuyến mãi; thông báo khi đơn đổi trạng thái.
+
+## 5. Ngoài phạm vi (out-of-scope)
+
+- **Cổng Ví/Thẻ thật**: không tích hợp MoMo/VNPAY/thẻ ngân hàng thật; Ví/Thẻ chỉ là dịch vụ mô phỏng trong NestJS (ADR-003).
+- **Giao hàng**: không có module ship, địa chỉ, phí vận chuyển.
+- **Thông báo đẩy**: không có push notification / email / SMS khi đổi trạng thái đơn (khách tự xem trên trang đơn hàng).
+- **Nhiều chi nhánh / multi-tenant**, phân quyền nhân viên chi tiết, báo cáo doanh thu.
+- **POS phần cứng**: in hoá đơn nhiệt, máy quét mã.
+
+## 6. Giả định (assumptions)
 
 - Khách hàng có smartphone/máy tính với trình duyệt hiện đại và kết nối internet.
 - Dịch vụ thanh toán mô phỏng chấp nhận mọi giao dịch hợp lệ và kết quả do hệ thống quyết định (không phụ thuộc bên thứ ba).
@@ -56,7 +70,7 @@ Tại cửa hàng Phúc Long, khách hiện phải **xếp hàng tại quầy** 
 - Ảnh món dùng URL ngoài (Unsplash/CDN public), không tự lưu trữ file.
 - Nhóm đủ 4–6 thành viên, phân vai theo task của đề bài.
 
-## 6. Ràng buộc (constraints)
+## 7. Ràng buộc (constraints)
 
 | Loại | Ràng buộc |
 | --- | --- |
@@ -68,7 +82,7 @@ Tại cửa hàng Phúc Long, khách hiện phải **xếp hàng tại quầy** 
 | Nền tảng | Dùng tier miễn phí: Vercel (web), Render (API/Docker), Neon (PostgreSQL) |
 | Thời gian | Hoàn thành theo 5 task tuần tự trong học kỳ, Sprint 1 + Sprint 2 |
 
-## 7. Rủi ro ban đầu và hướng xử lý
+## 8. Rủi ro ban đầu và hướng xử lý
 
 | Rủi ro | Ảnh hưởng | Hướng xử lý |
 | --- | --- | --- |
@@ -76,5 +90,6 @@ Tại cửa hàng Phúc Long, khách hiện phải **xếp hàng tại quầy** 
 | Giới hạn free tier của Neon/Vercel/Render (storage, bandwidth) | Hệ thống dừng nếu vượt hạn mức | Theo dõi dashboard; dữ liệu demo nhỏ; backup định kỳ |
 | Mock payment khác xa cổng thật | Luồng thật (3DS, callback) không được kiểm chứng | Giữ interface `PaymentsService` dễ thay bằng adapter cổng thật sau này; ghi rõ trong tài liệu |
 | Ảnh menu dùng URL ngoài có thể chết | Menu hiển thị thiếu ảnh | Dùng nguồn ổn định (Unsplash CDN); nếu cần, chuyển sang lưu ảnh nội bộ |
-| Scope creep (loyalty, promotion, ship) | Trễ deadline các task bắt buộc | Khóa phạm vi theo mục 3–4; phần ngoài scope chỉ làm khi 5 task đã xong |
-| Frontend chưa có unit/E2E test (Task 5.2 đang dở) | Regression UI không được phát hiện tự động | Bổ sung integration test tạo đơn/thanh toán + 1 E2E luồng menu → xác nhận đơn trước khi bàn giao |
+| Scope creep (loyalty, promotion, ship) | Trễ deadline các task bắt buộc | Khoá phạm vi theo mục 3–5; phần mở rộng chỉ làm khi 5 task đã xong |
+| `PATCH /orders/:id/status` cho phép cả chủ đơn đổi trạng thái | Khách có thể tự chuyển đơn của mình sang `PAID` mà không thanh toán | Giới hạn API đổi trạng thái chỉ cho ADMIN (khách chỉ được huỷ đơn `PENDING`); bổ sung test phân quyền |
+| Chưa có màn hình cho nhân viên quầy | Nhân viên phải gọi API để đổi trạng thái đơn | Ưu tiên làm màn hình quầy ở phiên bản sau (mục 4) |

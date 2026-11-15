@@ -22,5 +22,5 @@ Smoke test sau deploy: `GET /health` phải trả 200. Secrets (`DATABASE_URL`, 
 - ✅ Không phải vận hành VPS; deploy tự động khi push/merge.
 - ✅ Rollback từng thành phần độc lập: Vercel Promote / Render Rollback / Neon restore (README mục 7).
 - ⚠️ Render free tier **ngủ sau idle** — request đầu có thể chậm ~30s; mitigate bằng health check định kỳ.
-- ⚠️ Next.js chạy trên Vercel (không dùng Docker cho web) — Dockerfile của repo dùng cho demo local; image production API riêng cho Render (đang hoàn thiện theo README 6.5).
+- ⚠️ Next.js chạy trên Vercel (không dùng Docker cho web) — `Dockerfile.web` chỉ dùng cho local; image API được `cd.yml` build, gắn tag commit SHA và đẩy lên GHCR trước khi deploy Render (xem `docs/deployment.md`).
 - ⚠️ Neon region có thể khác region Render → độ trễ DB vài chục ms (chấp nhận với NFR-01 < 500ms).
