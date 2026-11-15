@@ -5,6 +5,14 @@ Chi tiết từng bản phát hành: [`docs/release-notes/`](docs/release-notes/
 
 ## [Unreleased]
 
+### Added
+- Sơ đồ use-case tổng quát (`Task1_2_UseCase`) và use-case UC-01 (`Task1_3_UseCase`) có file nguồn PlantUML.
+- FR-09 quản lý trạng thái đơn; NFR-05 tính sẵn sàng, NFR-06 secret & log; MoSCoW cho NFR-01.
+- Đặc tả UC-01: trigger, luồng thay thế và luồng ngoại lệ tách riêng.
+- Deployment diagram mới (`Task3_2_Deployment.puml`): local / CI / production, GHCR, secret, health check, log; bảng truy vết node → mã nguồn.
+- PWA: web app manifest, icon, theme color.
+- ESLint cho `apps/api`, chạy trong CI (job Backend CI).
+
 ## [1.0.0] – 2026-11-15
 
 ### Added

@@ -22,6 +22,7 @@
 | Task 5.2 Kiểm thử | Unit test API; integration test API trên PostgreSQL thật (`tests/api`); E2E Playwright menu → xác nhận đơn (`tests/e2e`); unit/component test web (`tests/web`) | `.github/workflows/ci.yml` |
 | Task 5.2 Hạ tầng | Prisma migration + seed, `docker-compose.yml`, `GET /health` | `apps/api/prisma/migrations`, PR #7 |
 | Task 5.3 CD | Image tag commit SHA → GHCR → migration → deploy Render → smoke test → rollback | `.github/workflows/cd.yml`, [deployment.md](../deployment.md) |
+| Bổ sung sau review | Sơ đồ use-case tổng quát + UC-01 (PlantUML), FR-09 quản lý trạng thái đơn, NFR-05/06, đặc tả use-case có trigger và luồng ngoại lệ, deployment diagram đầy đủ (registry, CI, secret, log), PWA manifest, ESLint backend trong CI | `docs/diagrams/Task1_*_UseCase.*`, `docs/architecture/Task3_2_Deployment.*`, `apps/web/app/manifest.ts`, `apps/api/eslint.config.mjs` |
 | Task 5.4 Bàn giao | Web Vercel, API Render, DB Neon; README chạy local/test/build/deploy/rollback; release v1.0.0 | README mục 5–7 |
 
 ### Demo
@@ -36,8 +37,6 @@
 - **15/11 – web production không gọi được API**: sau khi siết CORS về `CORS_ORIGIN`, biến này trên Render chưa có domain Vercel nên trình duyệt chặn request. Khắc phục: đặt `CORS_ORIGIN` (hoặc dùng proxy `API_PROXY_TARGET`); bổ sung kiểm tra CORS vào smoke test của CD để phát hiện ngay sau deploy.
 
 ### Chưa xong / tồn đọng
-- Lint cho backend (chưa cấu hình ESLint ở `apps/api`).
-- PWA (manifest, cài đặt lên màn hình chính).
 - *(bổ sung theo backlog thực tế)*
 
 ## 2. Sprint Retrospective
