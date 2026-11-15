@@ -1,100 +1,18 @@
 /**
- * Task 9 – gọi API xem đơn (GET /orders/me, GET /orders/:id) và các hàm hiển thị.
- * Mọi lời gọi đều gắn JWT; kết quả trả về dạng { ok: true, data } | { ok: false, kind, message }
- * để trang chọn đúng giao diện (cần đăng nhập, không tìm thấy, lỗi mạng…).
+ * UI helpers cho trang đơn hàng (task9). Phần gọi API đã dời về lib/api.ts —
+ * file này re-export để các trang cũ không phải đổi import.
  */
-import { clearToken, getToken } from '@/lib/auth';
+import type { OrderStatus } from './api';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-
-export type OrderStatus =
-  | 'PENDING'
-  | 'PAID'
-  | 'PAYMENT_FAILED'
-  | 'PREPARING'
-  | 'READY'
-  | 'COMPLETED'
-  | 'CANCELLED';
-
-export interface OrderItem {
-  id: number;
-  productId: string;
-  productName: string;
-  size: 'S' | 'M' | 'L';
-  toppings: string[];
-  note?: string;
-  qty: number;
-  unitPrice: number;
-  lineTotal: number;
-}
-
-/** Khớp OrderResponseDto ở apps/api/src/orders/dto/order-response.dto.ts. */
-export interface Order {
-  id: number;
-  code: string;
-  status: OrderStatus;
-  subtotal?: number;
-  discountAmount?: number;
-  voucherCode?: string;
-  total: number;
-  itemCount: number;
-  createdAt: string;
-  updatedAt: string;
-  items: OrderItem[];
-}
-
-export type ErrorKind =
-  | 'unauthenticated' // chưa đăng nhập / token hết hạn (401)
-  | 'forbidden' // đơn của người khác (403)
-  | 'not-found' // không có đơn (404)
-  | 'network' // không gọi được máy chủ
-  | 'server'; // lỗi khác
-
-export type ApiResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; kind: ErrorKind; message: string };
-
-async function getJson<T>(path: string): Promise<ApiResult<T>> {
-  const token = getToken();
-  if (!token) {
-    return { ok: false, kind: 'unauthenticated', message: 'Bạn cần đăng nhập để xem đơn hàng.' };
-  }
-
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE_URL}${path}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
-  } catch {
-    return { ok: false, kind: 'network', message: 'Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.' };
-  }
-
-  if (res.ok) {
-    return { ok: true, data: (await res.json()) as T };
-  }
-  if (res.status === 401) {
-    clearToken(); // token hết hạn/sai → xoá để lần sau đăng nhập lại
-    return { ok: false, kind: 'unauthenticated', message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' };
-  }
-  if (res.status === 403) {
-    return { ok: false, kind: 'forbidden', message: 'Đơn hàng này không thuộc tài khoản của bạn.' };
-  }
-  if (res.status === 404) {
-    return { ok: false, kind: 'not-found', message: 'Không tìm thấy đơn hàng.' };
-  }
-  return { ok: false, kind: 'server', message: `Máy chủ gặp lỗi (${res.status}). Vui lòng thử lại.` };
-}
-
-/** GET /orders/me – lịch sử đơn của người đang đăng nhập, mới nhất trước. */
-export function fetchMyOrders(): Promise<ApiResult<Order[]>> {
-  return getJson<Order[]>('/orders/me');
-}
-
-/** GET /orders/:id – chi tiết một đơn (chỉ chủ đơn hoặc ADMIN). */
-export function fetchOrder(id: string | number): Promise<ApiResult<Order>> {
-  return getJson<Order>(`/orders/${encodeURIComponent(String(id))}`);
-}
+export {
+  fetchMyOrders,
+  fetchOrder,
+  type ApiResult,
+  type ApiErrorKind as ErrorKind,
+  type Order,
+  type OrderItem,
+  type OrderStatus,
+} from './api';
 
 /** Nhãn tiếng Việt + màu cho từng trạng thái đơn. */
 export const STATUS_INFO: Record<OrderStatus, { label: string; className: string }> = {
@@ -108,7 +26,12 @@ export const STATUS_INFO: Record<OrderStatus, { label: string; className: string
 };
 
 export function statusInfo(status: string) {
-  return STATUS_INFO[status as OrderStatus] ?? { label: status, className: 'bg-stone-100 text-stone-700 border-stone-200' };
+  return (
+    STATUS_INFO[status as OrderStatus] ?? {
+      label: status,
+      className: 'bg-stone-100 text-stone-700 border-stone-200',
+    }
+  );
 }
 
 export function formatVnd(amount: number): string {

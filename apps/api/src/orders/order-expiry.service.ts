@@ -1,0 +1,89 @@
+import {
+  Inject,
+  Injectable,
+  OnApplicationBootstrap,
+  OnApplicationShutdown,
+  Optional,
+} from '@nestjs/common';
+import { OrderStatus } from './entities/order.entity';
+import { OrdersService } from './orders.service';
+import { PrismaService } from '../prisma/prisma.service';
+
+/**
+ * Dọn đơn PENDING bỏ quên: tồn kho bị một đơn không bao giờ thanh toán giữ
+ * mãi sẽ khiến menu "hết hàng" ảo. Service tự hủy đơn PENDING quá hạn,
+ * hoàn lại tồn kho (qua luồng CANCELLED chuẩn của OrdersService) và đánh dấu
+ * các phiên SePay đang chờ của đơn đó thành EXPIRED.
+ *
+ * Chỉ hoạt động khi có database (nhánh in-memory của unit test bỏ qua).
+ * Chu kỳ chạy: 60 giây; TTL cấu hình bằng ORDER_PENDING_TTL_MINUTES (mặc định 10).
+ */
+@Injectable()
+export class OrderExpiryService
+  implements OnApplicationBootstrap, OnApplicationShutdown
+{
+  /** TTL mặc định: 10 phút — gấp 5 lần hạn chót QR SePay (2 phút). */
+  private static readonly DEFAULT_TTL_MINUTES = 10;
+  private static readonly INTERVAL_MS = 60_000;
+  private static readonly BATCH_SIZE = 20;
+
+  private timer?: ReturnType<typeof setInterval>;
+
+  constructor(
+    private readonly ordersService: OrdersService,
+    @Optional() @Inject(PrismaService) private readonly prisma?: PrismaService | null,
+  ) {}
+
+  onApplicationBootstrap(): void {
+    this.timer = setInterval(
+      () => void this.cancelExpiredPendingOrders(),
+      OrderExpiryService.INTERVAL_MS,
+    );
+    // Không giữ process sống chỉ để dọn đơn.
+    this.timer.unref?.();
+  }
+
+  onApplicationShutdown(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+    }
+  }
+
+  async cancelExpiredPendingOrders(): Promise<void> {
+    if (!this.prisma) return;
+
+    const ttlMinutes = Number(
+      process.env.ORDER_PENDING_TTL_MINUTES ??
+        OrderExpiryService.DEFAULT_TTL_MINUTES,
+    );
+    if (!Number.isFinite(ttlMinutes) || ttlMinutes <= 0) return;
+
+    const cutoff = new Date(Date.now() - ttlMinutes * 60_000);
+    const staleOrders = await this.prisma.order.findMany({
+      where: { status: OrderStatus.PENDING, createdAt: { lt: cutoff } },
+      select: { id: true },
+      take: OrderExpiryService.BATCH_SIZE,
+    });
+
+    for (const { id } of staleOrders) {
+      try {
+        // Đi qua luồng chuẩn: assertTransition + CAS + hoàn stock + version++.
+        await this.ordersService.updateStatus(id, OrderStatus.CANCELLED);
+
+        // Các phiên SePay đang chờ của đơn tự hủy → EXPIRED (kèm lý do).
+        await this.prisma.payment.updateMany({
+          where: { orderId: id, status: 'PENDING' },
+          data: {
+            status: 'EXPIRED',
+            result: {
+              status: 'EXPIRED',
+              reason: 'Đơn hàng tự hủy do hết thời gian chờ thanh toán',
+            },
+          },
+        });
+      } catch {
+        // Đơn vừa bị luồng khác xử lý (CAS thất bại) — lần quét sau sẽ hết.
+      }
+    }
+  }
+}

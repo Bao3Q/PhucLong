@@ -1,13 +1,31 @@
 'use client';
 
-import React, { Suspense } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { fetchOrder, statusInfo, type ApiResult, type Order } from '@/lib/orders';
 
 function OrderSuccessContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const orderId = searchParams.get('orderId') || 'ORD-UNKNOWN';
   const transId = searchParams.get('transId') || 'TXN-MOCK';
+
+  // Trạng thái thật từ server — không còn hardcode "PAID" khi reload/trở lại trang.
+  const [result, setResult] = useState<ApiResult<Order> | null>(null);
+
+  useEffect(() => {
+    if (!/^\d+$/.test(orderId)) return;
+    let cancelled = false;
+    void fetchOrder(orderId).then((res) => {
+      if (!cancelled) setResult(res);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [orderId]);
+
+  const order = result?.ok ? result.data : null;
+  const statusMeta = order ? statusInfo(order.status) : null;
 
   return (
     <div className="bg-white p-8 md:p-12 rounded-3xl border border-stone-200/80 shadow-xl max-w-md w-full text-center space-y-6">
@@ -17,7 +35,9 @@ function OrderSuccessContent() {
 
       <div className="space-y-2">
         <span className="text-[10px] font-black uppercase tracking-widest text-[#006A32] bg-emerald-50 px-3 py-1 rounded-full">
-          GIAO DỊCH THÀNH CÔNG
+          {order?.status === 'PENDING'
+            ? 'ĐÃ TẠO ĐƠN — ĐANG CHỜ THANH TOÁN'
+            : 'GIAO DỊCH THÀNH CÔNG'}
         </span>
         <h1 className="text-2xl font-black text-stone-900">Đặt Hàng Thành Công!</h1>
         <p className="text-xs text-stone-500">
@@ -28,7 +48,7 @@ function OrderSuccessContent() {
       <div className="bg-stone-50 rounded-2xl p-4 text-left space-y-2.5 border border-stone-200/60 text-xs">
         <div className="flex justify-between">
           <span className="text-stone-400">Mã đơn hàng:</span>
-          <span className="font-extrabold text-stone-900">{orderId}</span>
+          <span className="font-extrabold text-stone-900">{order?.code ?? orderId}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-stone-400">Mã giao dịch:</span>
@@ -36,7 +56,13 @@ function OrderSuccessContent() {
         </div>
         <div className="flex justify-between">
           <span className="text-stone-400">Trạng thái đơn:</span>
-          <span className="font-bold text-emerald-600">ĐÃ THANH TOÁN (PAID)</span>
+          <span
+            className={`font-bold ${
+              order?.status === 'PENDING' ? 'text-amber-600' : 'text-emerald-600'
+            }`}
+          >
+            {statusMeta ? statusMeta.label.toUpperCase() : 'ĐÃ THANH TOÁN (PAID)'}
+          </span>
         </div>
       </div>
 

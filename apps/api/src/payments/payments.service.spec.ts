@@ -64,6 +64,11 @@ describe('PaymentsService', () => {
     recipeItem: { findMany: jest.fn() },
     ingredient: { updateMany: jest.fn() },
     payment: { create: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+    user: {
+      findUnique: jest.fn().mockResolvedValue({ id: 'test-user-id', loyaltyPoints: 0 }),
+      update: jest.fn().mockResolvedValue({}),
+    },
+    loyaltyTransaction: { create: jest.fn().mockResolvedValue({}) },
   };
   const prisma = {
     payment: {
@@ -102,6 +107,20 @@ describe('PaymentsService', () => {
     expect(orders.updateStatus).toHaveBeenCalledWith(1, OrderStatus.PAID, tx);
     expect(tx.payment.create).toHaveBeenCalledTimes(1);
     expect(payment).toMatchObject({ id: 1, orderId: 1, status: 'PAID' });
+    // Đơn 100.000đ → tặng 10 điểm loyalty trong cùng transaction
+    expect(tx.user.update).toHaveBeenCalledWith({
+      where: { id: 'test-user-id' },
+      data: { loyaltyPoints: { increment: 10 } },
+    });
+    expect(tx.loyaltyTransaction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: 'test-user-id',
+        orderId: 1,
+        type: 'EARN',
+        points: 10,
+        balanceAfter: 10,
+      }),
+    });
   });
 
   it('trừ ly và nguyên liệu trong cùng transaction', async () => {
