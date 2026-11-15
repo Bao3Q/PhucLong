@@ -65,6 +65,9 @@ export default function CheckoutPage() {
     if (res.ok) {
       setVoucher(res.data);
       setVoucherInput(res.data.code);
+    } else if (res.kind === 'unauthenticated') {
+      // Xem voucher cũng cần đăng nhập (khớp với đặt đơn) → sang /login rồi quay lại.
+      router.push('/login?next=/checkout');
     } else {
       setVoucher(null);
       setVoucherError(res.message);

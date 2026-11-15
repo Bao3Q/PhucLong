@@ -4,7 +4,7 @@
  * Mã test khớp docs/traceability-matrix.md (INT-T01 … INT-T07).
  */
 import { INestApplication } from '@nestjs/common';
-import { ONE_CAPPUCCINO, PASSWORD, bearer, createApp, registerAndLogin, request, uniqueEmail } from './helpers';
+import { ONE_CAPPUCCINO, PASSWORD, bearer, createApp, loginAdmin, registerAndLogin, request, uniqueEmail } from './helpers';
 
 type Cup = { size: string; quantity: number };
 
@@ -13,12 +13,14 @@ describe('API tạo đơn và thanh toán (integration, PostgreSQL thật)', () 
   let http: ReturnType<INestApplication['getHttpServer']>;
   let tokenA: string;
   let tokenB: string;
+  let tokenAdmin: string;
 
   beforeAll(async () => {
     app = await createApp();
     http = app.getHttpServer();
     tokenA = await registerAndLogin(app, 'khach-a');
     tokenB = await registerAndLogin(app, 'khach-b');
+    tokenAdmin = await loginAdmin(app);
   });
 
   afterAll(async () => {
@@ -26,7 +28,8 @@ describe('API tạo đơn và thanh toán (integration, PostgreSQL thật)', () 
   });
 
   async function cupsS(): Promise<number> {
-    const res = await request(http).get('/inventory').expect(200);
+    // GET /inventory giờ chỉ ADMIN được xem → dùng token admin
+    const res = await request(http).get('/inventory').set(bearer(tokenAdmin)).expect(200);
     return (res.body.cups as Cup[]).find((c) => c.size === 'S')?.quantity ?? -1;
   }
 
