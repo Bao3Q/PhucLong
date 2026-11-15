@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import React, { Suspense, useEffect, useState, type ReactNode } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import OrderHeader, { StatusBadge } from '@/components/OrderHeader';
 import { fetchOrder, formatDateTime, formatVnd, statusInfo, type ApiResult, type Order } from '@/lib/orders';
@@ -10,7 +10,7 @@ const POLL_INTERVAL_MS = 3000;
 const MAX_POLLS = 20;
 
 /** Task 9 – Màn hình xác nhận đơn: GET /orders/:id (mã đơn, trạng thái, món, tổng tiền). */
-export default function OrderConfirmationPage() {
+function OrderConfirmationContent() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params?.id ?? '';
@@ -153,5 +153,26 @@ export default function OrderConfirmationPage() {
       <OrderHeader />
       <main className="max-w-md mx-auto px-6 py-8">{content}</main>
     </div>
+  );
+}
+
+/**
+ * Route prerender với cacheComponents: component đọc URL data (`useParams`)
+ * phải nằm trong <Suspense> — cùng pattern với trang /order-success.
+ */
+export default function OrderConfirmationPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#F7F6F2]">
+          <OrderHeader />
+          <main className="max-w-md mx-auto px-6 py-8">
+            <div className="text-stone-500 font-bold">Đang tải...</div>
+          </main>
+        </div>
+      }
+    >
+      <OrderConfirmationContent />
+    </Suspense>
   );
 }
