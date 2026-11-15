@@ -19,32 +19,34 @@
 
 | Container | Công nghệ | Trách nhiệm | Nơi chạy |
 | --- | --- | --- | --- |
-| **Web** | Next.js 16 + React 19 + Tailwind 4 | Menu mobile-first, modal chi tiết món (size/topping), giỏ hàng (localStorage), checkout, order-success; gọi REST API | Vercel |
-| **API** | NestJS 11 + Prisma 7 | Nghiệp vụ: auth (JWT), products, orders, payments, inventory, health | Render (Docker) |
-| **Database** | PostgreSQL 16 | Lưu User, Order, OrderItem, Payment, Promotion, LoyaltyTransaction, Ingredient, Cup, RecipeItem | Neon |
+| **Web** | Next.js 16 + React 19 + Tailwind 4 | Menu mobile-first (PWA), modal chi tiết món (size/topping), giỏ hàng (localStorage), checkout, đăng nhập/đăng ký, xác nhận đơn `/orders/[id]`, lịch sử `/orders`; gọi REST API | Vercel |
+| **API** | NestJS 11 + Prisma 7 | Nghiệp vụ: auth (JWT, RBAC), products, orders (máy trạng thái, tự huỷ đơn quá hạn), payments (Ví/Thẻ mô phỏng, SePay), promotions, inventory, health | Render (Docker) |
+| **Database** | PostgreSQL 16 | Lưu User, Product, Order, OrderItem, Payment, Promotion, LoyaltyTransaction, Ingredient, Cup, RecipeItem | Neon |
 | **Dịch vụ thanh toán mô phỏng** | Module `payments` bên trong API | Xử lý Ví/Thẻ giả lập, idempotency-key, transaction trừ kho | (cùng container API) |
+| **SePay** (bên ngoài) | Dịch vụ chuyển khoản QR | Gửi webhook khi tài khoản nhận tiền; API xác thực bằng API key | Bên thứ ba |
 
 ## 3. Cấu trúc module backend
 
 ```text
 apps/api/src/
-├── auth/        # đăng ký/đăng nhập, ký & xác minh JWT (HMAC)
-├── common/auth/ # JwtAuthGuard, AuthUser interface — bảo vệ các route cần đăng nhập (NFR-02)
-├── products/    # menu: GET/POST /products (POST chỉ ADMIN — RBAC); dữ liệu seed in-memory
-├── orders/      # POST /orders (cần JWT) tạo Order + OrderItems; GET /orders/:id
-├── payments/    # POST /payments (idempotency-key): transaction trừ kho + PAID + ghi Payment
-├── inventory/   # GET /inventory — tồn kho nguyên liệu
+├── auth/        # đăng ký/đăng nhập (bcrypt), ký & xác minh JWT HS256 (hạn 1 giờ)
+├── common/auth/ # JwtAuthGuard, RolesGuard + @Roles('ADMIN') — bảo vệ route cần đăng nhập/phân quyền (NFR-02)
+├── products/    # GET /products, GET /products/:id; POST, PATCH /products chỉ ADMIN; seed 4 món mẫu vào bảng Product khi khởi động
+├── orders/      # POST /orders, GET /orders/me, GET /orders/:id, PATCH /orders/:id/status; máy trạng thái; OrderExpiryService tự huỷ đơn PENDING quá hạn
+├── payments/    # POST /payments (Idempotency-Key), POST /payments/sepay, webhook SePay, GET /payments/:orderId, GET /payments/loyalty
+├── promotions/  # POST /promotions/validate — kiểm tra và tính tiền giảm
+├── inventory/   # GET /inventory — tồn kho nguyên liệu và ly
 ├── health/      # GET /health — 200 khi OK, 503 khi DB mất (NFR-04)
 └── prisma/      # PrismaService (global) — client PostgreSQL qua @prisma/adapter-pg
 ```
 
-Frontend phân lớp rõ: `app/*/page.tsx` (route/UI) → `components/` (ProductModal) → `lib/auth.ts` (lưu JWT) → fetch trực tiếp tới API qua `NEXT_PUBLIC_API_URL`.
+Frontend phân lớp: `app/*/page.tsx` (route/UI) → `components/` (ProductModal, SiteHeader…) → `lib/` (`api.ts`, `auth.ts`, `cart.ts`, `orders.ts`). Trình duyệt gọi `/api/*` cùng domain, Next.js chuyển tiếp sang API theo `API_PROXY_TARGET` (`next.config.ts`); nếu đặt `NEXT_PUBLIC_API_URL` thì gọi thẳng API (khi đó cần CORS).
 
 ## 4. Logging, health check, quản lý cấu hình
 
-- **Logging**: log mặc định của NestJS (bootstrap + request lifecycle), không dùng dịch vụ tập trung ở MVP.
+- **Logging**: logger mặc định của NestJS ghi log khởi động và lỗi/exception ra stdout; Render thu log container để xem trên dashboard. MVP chưa ghi log từng request và chưa dùng dịch vụ log tập trung.
 - **Health check**: `GET /health` — kiểm tra phản hồi DB bằng `SELECT 1`; 503 khi DB mất, dùng làm smoke test sau deploy và để Render restart container (Task 5.3).
-- **Cấu hình**: biến môi trường theo `.env.example` — `DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRATION`, `CORS_ORIGIN`, `PORT`, `NEXT_PUBLIC_API_URL`. Local đọc từ `.env` (root hoặc `apps/api`); production đặt trong dashboard Render/Vercel/Neon, **không commit secret**.
+- **Cấu hình**: biến môi trường theo `.env.example`. API: `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGIN`, `PORT`, `ORDER_PENDING_TTL_MINUTES`, `SEPAY_ACC`, `SEPAY_BANK`, `SEPAY_API_KEY`. Web: `API_PROXY_TARGET`, `NEXT_PUBLIC_API_URL`. Thời hạn JWT cố định 1 giờ trong code (`JWT_EXPIRES_IN_SECONDS`), biến `JWT_EXPIRATION` trong `.env.example` hiện không được đọc. Local đọc từ `.env` (root hoặc `apps/api`); production đặt trong dashboard Render/Vercel/Neon, **không commit secret**.
 
 ## 5. Quyết định kiến trúc chính (ADR index)
 
@@ -66,10 +68,10 @@ Frontend phân lớp rõ: `app/*/page.tsx` (route/UI) → `components/` (Product
 - Health check + migration pre-deploy → deploy an toàn lặp lại được.
 
 **Hạn chế & trade-off (đã cân nhắc)**:
-- **Danh mục sản phẩm in-memory** (`SEED_PRODUCTS` trong `products.service.ts`) — restart API mất thay đổi menu đã sửa qua `POST /products`; chấp nhận cho MVP vì menu ít đổi, chuyển sang bảng `Product` khi làm loyalty/promotion.
+- **Seed sản phẩm khi khởi động**: `products.service.ts` upsert 4 món mẫu (`SEED_PRODUCTS`) vào bảng `Product` mỗi lần API khởi động, nên tên/giá của 4 món này bị ghi đè về giá trị seed nếu ADMIN đã sửa; món mới tạo bằng `POST /products` không bị ảnh hưởng. Chấp nhận cho MVP; bỏ upsert khi có giao diện quản trị menu.
 - **Monolith**: scale từng phần không được; nếu tách payment thành service riêng cần thêm hàng đợi/hợp đồng API.
 - **Render free tier cold start** (~30s sau idle): ảnh hưởng demo; mitigate bằng health check định kỳ.
-- **JWT stateless**: không revoke ngay được khi đổi secret/chặn user — chấp nhận, token ngắn hạn `1d`.
+- **JWT stateless**: không thu hồi ngay được khi chặn user — chấp nhận vì token ngắn hạn (1 giờ).
 
 ## 7. Deployment diagram (Task 3.2)
 
