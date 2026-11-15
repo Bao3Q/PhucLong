@@ -3,13 +3,15 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  NotFoundException,
   Optional,
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { Prisma, ProductSize } from '../generated/prisma/client';
+import { LoyaltyTransactionType, Prisma, ProductSize } from '../generated/prisma/client';
 import { OrdersService } from '../orders/orders.service';
 import { Order, OrderStatus } from '../orders/entities/order.entity';
 import type { AuthUser } from '../common/auth/auth-user.interface';
+import { UsersRepository } from '../auth/users.repository';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   PaymentRecord,
@@ -19,6 +21,9 @@ import {
 
 /** Hạn chót của phiên thanh toán SePay (giây) — đề bài yêu cầu 2 phút. */
 const SEPAY_TIMEOUT_SECONDS = Number(process.env.SEPAY_TIMEOUT_SECONDS || 120);
+
+/** Cứ mỗi 10.000đ được thanh toán thành công thì tặng 1 điểm loyalty. */
+const LOYALTY_EARN_UNIT = 10_000;
 
 /** result là Json của Prisma — luôn đưa về object để ghi đè an toàn. */
 function asRecord(result: unknown): Record<string, unknown> {
@@ -42,14 +47,17 @@ export class PaymentsService {
   constructor(
     private readonly ordersService: OrdersService,
     @Optional() @Inject(PrismaService) private readonly prisma?: PrismaService | null,
+    @Optional() private readonly usersRepository?: UsersRepository,
   ) {}
 
   async processPayment(
     orderId: string | number,
     method: 'momo' | 'card',
     idempotencyKey?: string,
+    user?: AuthUser,
   ): Promise<PaymentRecord> {
-    const order = await this.ordersService.findOne(orderId);
+    // Có user (route có JWT) → chỉ chủ đơn hoặc ADMIN được thanh toán.
+    const order = await this.ordersService.findOne(orderId, user);
 
     // Vân tay nội dung: cùng key nhưng khác nội dung (đơn/method) là bị cấm.
     const requestFingerprint = `${order.id}:${method || 'card'}`;
@@ -89,6 +97,7 @@ export class PaymentsService {
           OrderStatus.PAID,
           tx,
         );
+        await this.awardLoyaltyPoints(tx, paidOrder.userId, paidOrder.id, paidOrder.total);
 
         return tx.payment.create({
           data: {
@@ -182,6 +191,53 @@ export class PaymentsService {
         }
       }
     }
+  }
+
+  /**
+   * Cộng điểm loyalty cho đơn vừa thanh toán thành công (1 điểm/10.000đ) và
+   * ghi dòng LoyaltyTransaction EARN. Chạy trong cùng transaction với payment
+   * nên lỗi ở đây cũng rollback toàn bộ thanh toán.
+   */
+  private async awardLoyaltyPoints(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    orderId: number,
+    total: number,
+  ): Promise<void> {
+    const points = Math.floor(total / LOYALTY_EARN_UNIT);
+    if (points <= 0) return;
+
+    const user = await tx.user.findUnique({ where: { id: userId } });
+    if (!user) return; // user đã bị xóa giữa chừng — bỏ qua, không chặn payment
+
+    const balanceAfter = user.loyaltyPoints + points;
+    await tx.user.update({
+      where: { id: userId },
+      data: { loyaltyPoints: { increment: points } },
+    });
+    await tx.loyaltyTransaction.create({
+      data: {
+        userId,
+        orderId,
+        type: LoyaltyTransactionType.EARN,
+        points,
+        balanceAfter,
+        description: `Tích điểm từ đơn #${orderId}`,
+      },
+    });
+  }
+
+  /** GET /payments/loyalty — điểm thưởng hiện tại của user đang đăng nhập. */
+  async getLoyaltyPoints(
+    user: AuthUser,
+  ): Promise<{ userId: string; loyaltyPoints: number }> {
+    const found = this.prisma
+      ? await this.prisma.user.findUnique({ where: { id: user.id } })
+      : ((await this.usersRepository?.findById(user.id)) ?? null);
+    if (!found) {
+      throw new NotFoundException('Không tìm thấy người dùng');
+    }
+    return { userId: found.id, loyaltyPoints: found.loyaltyPoints };
   }
 
   /**
@@ -320,6 +376,7 @@ export class PaymentsService {
         // hết nguyên liệu/ly thì toàn bộ rollback, phiên vẫn PENDING.
         await this.deductInventory(tx, order);
         await this.ordersService.updateStatus(order.id, OrderStatus.PAID, tx);
+        await this.awardLoyaltyPoints(tx, order.userId, order.id, order.total);
       });
     } catch (error) {
       // Tiền đã vào nhưng không fulfill được → đánh dấu FAILED để tránh retry vô ích.

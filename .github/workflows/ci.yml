@@ -39,6 +39,25 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
+    # Postgres thật cho bước migration + integration test (không còn chỉ
+    # test in-memory — transaction SQL thật được kiểm tra trong CI).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: phuclong
+          POSTGRES_PASSWORD: phuclong_password
+          POSTGRES_DB: phuclong_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U phuclong -d phuclong_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://phuclong:phuclong_password@localhost:5432/phuclong_ci?schema=public
+      JWT_SECRET: ci_test_secret
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -51,7 +70,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Unit Test
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Unit + Integration Test
         run: npm run test
 
       - name: Build

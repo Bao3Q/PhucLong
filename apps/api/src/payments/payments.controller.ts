@@ -19,16 +19,19 @@ import type { AuthUser } from '../common/auth/auth-user.interface';
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
-  // Giữ luồng momo/card (hoàn tất ngay) cho so sánh/demo nội bộ.
+  // Luồng momo/card (hoàn tất ngay) — cần đăng nhập và chỉ chủ đơn (hoặc ADMIN)
+  // được thanh toán: không còn ai đánh dấu đơn của người khác PAID được.
   @Post()
+  @UseGuards(JwtAuthGuard)
   async pay(
+    @Req() request: Request & { user: AuthUser },
     @Body('orderId') orderId: string,
     @Body('method') method: 'momo' | 'card',
     @Headers('idempotency-key') headerKey?: string,
     @Body('idempotencyKey') bodyKey?: string,
   ) {
     const key = headerKey || bodyKey;
-    return this.paymentsService.processPayment(orderId, method, key);
+    return this.paymentsService.processPayment(orderId, method, key, request.user);
   }
 
   // Tạo phiên thanh toán SePay (QR chuyển khoản) — cần đăng nhập, chỉ chủ đơn.
@@ -50,6 +53,14 @@ export class PaymentsController {
     @Body('orderId') orderId: string,
   ) {
     return this.paymentsService.simulateSePayPayment(orderId, request.user);
+  }
+
+  // Điểm thưởng tích lũy của user đang đăng nhập — khai báo trước @Get(':orderId')
+  // để không bị nuốt vào route param.
+  @Get('loyalty')
+  @UseGuards(JwtAuthGuard)
+  async getLoyaltyPoints(@Req() request: Request & { user: AuthUser }) {
+    return this.paymentsService.getLoyaltyPoints(request.user);
   }
 
   // Tra trạng thái thanh toán — frontend poll mỗi vài giây trong phiên SePay.

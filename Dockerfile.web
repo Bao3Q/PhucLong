@@ -1,0 +1,37 @@
+# ---------- BUILD STAGE ----------
+FROM node:22-bookworm-slim AS build
+WORKDIR /workspace
+
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+COPY apps/api/package.json ./apps/api/package.json
+COPY apps/web/package.json ./apps/web/package.json
+RUN npm ci
+
+COPY apps/web ./apps/web
+
+# NEXT_PUBLIC_* được bake vào bundle lúc build. Để RỖNG để client gọi
+# same-origin /api/* (qua rewrite proxy của next.config.ts).
+ARG NEXT_PUBLIC_API_URL=""
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+RUN cd apps/web && npm run build
+
+# ---------- RUNTIME STAGE ----------
+FROM node:22-bookworm-slim
+ENV NODE_ENV=production
+WORKDIR /workspace/apps/web
+
+COPY --from=build /workspace/node_modules /workspace/node_modules
+COPY --from=build /workspace/apps/web/node_modules ./node_modules
+COPY --from=build /workspace/apps/web/.next ./.next
+COPY --from=build /workspace/apps/web/public ./public
+COPY --from=build /workspace/apps/web/package.json ./package.json
+COPY --from=build /workspace/apps/web/next.config.ts ./next.config.ts
+
+# Proxy target đọc lúc runtime (next.config.ts rewrites) — compose trỏ sang backend.
+ENV API_PROXY_TARGET=http://localhost:4000
+
+USER node
+EXPOSE 3000
+CMD ["npm", "start"]

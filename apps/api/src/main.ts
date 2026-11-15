@@ -16,8 +16,14 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   setupApp(app);
 
+  // CORS whitelist: chỉ những origin trong CORS_ORIGIN (phân cách bằng dấu phẩy)
+  // được gọi API — không còn `origin: true` phản chiếu mọi nguồn.
+  const corsOrigins = (process.env.CORS_ORIGIN ?? 'http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
   app.enableCors({
-    origin: true,
+    origin: corsOrigins,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });

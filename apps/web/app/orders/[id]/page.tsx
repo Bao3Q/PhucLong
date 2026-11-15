@@ -3,6 +3,7 @@
 import React, { Suspense, useEffect, useState, type ReactNode } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import OrderHeader, { StatusBadge } from '@/components/OrderHeader';
+import { fetchLoyaltyPoints } from '@/lib/api';
 import { fetchOrder, formatDateTime, formatVnd, statusInfo, type ApiResult, type Order } from '@/lib/orders';
 
 /** Đơn còn chờ thanh toán thì hỏi lại máy chủ mỗi 3 giây, tối đa 20 lần (~1 phút). */
@@ -17,6 +18,8 @@ function OrderConfirmationContent() {
   const [result, setResult] = useState<ApiResult<Order> | null>(null); // null = đang tải
   const [polls, setPolls] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
+  // Điểm loyalty hiện có (được cộng tự động khi đơn thanh toán thành công).
+  const [loyaltyPoints, setLoyaltyPoints] = useState<number | null>(null);
 
   // Tải đơn; nếu vẫn PENDING thì hẹn giờ tải lại cho tới khi đổi trạng thái hoặc hết lượt.
   useEffect(() => {
@@ -35,6 +38,11 @@ function OrderConfirmationContent() {
       });
     };
     load(0);
+
+    // Điểm loyalty cập nhật cả khi đơn vừa chuyển PAID nhờ polling ở trên.
+    void fetchLoyaltyPoints().then((res) => {
+      if (!cancelled && res.ok) setLoyaltyPoints(res.data.loyaltyPoints);
+    });
 
     return () => {
       cancelled = true;
@@ -134,6 +142,12 @@ function OrderConfirmationContent() {
             <span className="font-bold text-stone-900">Tổng cộng</span>
             <span className="text-xl font-black text-[#006A32]">{formatVnd(order.total)}</span>
           </div>
+          {loyaltyPoints !== null && (
+            <div className="flex justify-between pt-2 text-xs text-stone-500">
+              <span>Điểm tích lũy hiện có</span>
+              <span className="font-bold text-amber-700">⭐ {loyaltyPoints} điểm</span>
+            </div>
+          )}
         </div>
 
         <div className="p-6 pt-0 grid grid-cols-2 gap-3">

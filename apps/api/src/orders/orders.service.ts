@@ -19,6 +19,7 @@ import {
   assertTransition,
 } from './entities/order.entity';
 import { ProductsService } from '../products/products.service';
+import { PromotionsService } from '../promotions/promotions.service';
 import { SIZE_SURCHARGE, TOPPINGS } from '../products/products.data';
 
 /** Topping hợp lệ — trùng bảng giá trong products.data.ts. */
@@ -35,6 +36,7 @@ export class OrdersService {
     @Optional()
     @Inject(PrismaService)
     private readonly prisma?: PrismaService | null,
+    @Optional() private readonly promotionsService?: PromotionsService,
   ) {}
 
   /** GET /orders/me – lịch sử đơn của user đang đăng nhập (mới nhất trước). */
@@ -105,11 +107,25 @@ export class OrdersService {
       }
       return nextSubtotal;
     }, 0);
-    const total = subtotal;
+
+    // Voucher được kiểm tra TRƯỚC khi trừ tồn kho để không giữ hàng vô nghĩa.
+    // Với nhánh DB, validate nằm trong transaction để đọc dòng Promotion mới nhất.
+    let discountAmount = 0;
+    let appliedVoucher: string | undefined;
+    let total = subtotal;
+    const voucherCode = createOrderDto.voucherCode?.trim().toUpperCase() || undefined;
+    const promotions = this.promotionsService ?? new PromotionsService(this.prisma);
 
     if (this.prisma) {
       const quantities = this.aggregateQuantities(normalizedItems);
       const createdOrderId = await this.prisma.$transaction(async (tx) => {
+        if (voucherCode) {
+          const applied = await promotions.validatePromotion(voucherCode, subtotal, tx);
+          discountAmount = applied.discountAmount;
+          appliedVoucher = applied.code;
+          total = Math.max(0, subtotal - discountAmount);
+        }
+
         // Thứ tự khóa nhất quán (sort theo id) tránh deadlock khi giỏ có món ngược nhau.
         for (const [productId, qty] of [...quantities].sort(([a], [b]) =>
           a.localeCompare(b),
@@ -144,7 +160,8 @@ export class OrdersService {
             userId: user.id,
             status: OrderStatus.PENDING,
             subtotal,
-            discountAmount: 0,
+            discountAmount,
+            voucherCode: appliedVoucher ?? null,
             total,
             items: {
               create: normalizedItems.map((item) => ({
@@ -160,6 +177,13 @@ export class OrdersService {
             },
           },
         });
+        if (appliedVoucher) {
+          // Lượt dùng voucher chỉ bị trừ khi đơn thực sự được tạo thành công.
+          await tx.promotion.update({
+            where: { code: appliedVoucher },
+            data: { usedCount: { increment: 1 } },
+          });
+        }
         return created.id;
       });
       const saved = await this.ordersRepository.findById(createdOrderId);
@@ -169,7 +193,14 @@ export class OrdersService {
       return toOrderResponse(saved);
     }
 
-    // Nhánh in-memory (test): trừ stock qua mutex, tạo đơn, lỗi thì hoàn stock.
+    // Nhánh in-memory (test): validate voucher → trừ stock qua mutex → tạo đơn.
+    if (voucherCode) {
+      const applied = await promotions.validatePromotion(voucherCode, subtotal);
+      discountAmount = applied.discountAmount;
+      appliedVoucher = applied.code;
+      total = Math.max(0, subtotal - discountAmount);
+    }
+
     const createAndSaveOrder = async (): Promise<OrderResponseDto> => {
       const orderId = this.ordersRepository.nextId();
       const now = new Date();
@@ -178,7 +209,8 @@ export class OrdersService {
         userId: user.id,
         status: OrderStatus.PENDING,
         subtotal,
-        discountAmount: 0,
+        discountAmount,
+        voucherCode: appliedVoucher,
         total,
         createdAt: now,
         updatedAt: now,
