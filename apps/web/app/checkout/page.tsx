@@ -2,10 +2,20 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { CartItem } from '@/app/types';
-import { clearToken, getToken } from '@/lib/auth';
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+import SiteHeader from '@/components/SiteHeader';
+import {
+  createOrder,
+  createSePayPayment,
+  fetchPayment,
+  payOrder,
+  simulateSePay,
+  validateVoucher,
+  type SePaySession,
+  type VoucherValidation,
+} from '@/lib/api';
+import { cartTotal, toOrderItems, useCart } from '@/lib/cart';
+import { formatVnd } from '@/lib/orders';
+import { getToken } from '@/lib/auth';
 
 /** Đơn hàng đang có phiên SePay chờ thanh toán — để quay lại /checkout còn khôi phục đúng phiên. */
 const PENDING_ORDER_KEY = 'phuclong_pending_order';
@@ -13,84 +23,89 @@ const PENDING_ORDER_KEY = 'phuclong_pending_order';
 type PaymentMethod = 'momo' | 'card' | 'sepay';
 type PayStatus = 'waiting' | 'expired' | 'failed';
 
-/** Phiên thanh toán SePay trả về từ POST /payments/sepay. */
-interface SePaySession {
-  orderId: number;
-  paymentCode: string;
-  qrUrl: string;
-  amount: number;
-  expiresAt: string;
-}
-
 function formatCountdown(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
 export default function CheckoutPage() {
   const router = useRouter();
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const { cart, setCart } = useCart();
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('sepay');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Voucher: nhập mã → validate trước (server) → áp vào tổng hiển thị và
+  // gửi kèm khi tạo đơn (server tính lại, không tin số tiền client).
+  const [voucherInput, setVoucherInput] = useState('');
+  const [voucher, setVoucher] = useState<VoucherValidation | null>(null);
+  const [voucherError, setVoucherError] = useState<string | null>(null);
+  const [validatingVoucher, setValidatingVoucher] = useState(false);
 
   // Phiên thanh toán SePay: có session → hiện màn hình QR thay cho form
   const [session, setSession] = useState<SePaySession | null>(null);
   const [payStatus, setPayStatus] = useState<PayStatus>('waiting');
   const [secondsLeft, setSecondsLeft] = useState(0);
 
+  // Đơn còn PENDING phiên SePay → subtotal thay đổi làm mất giá trị voucher cũ.
   useEffect(() => {
-    const savedCart = localStorage.getItem('phuclong_cart');
-    if (savedCart) {
-      try {
-        setCart(JSON.parse(savedCart));
-      } catch (e) {
-        console.error(e);
-      }
-    }
+    setVoucher(null);
+    setVoucherError(null);
+  }, [cart]);
 
-    // Quay lại /checkout khi còn phiên SePay đang chờ → khôi phục đúng phiên cũ
-    // (giỏ đã được dọn ngay khi tạo đơn, nên khôi phục dựa trên marker + API).
+  const applyVoucher = async () => {
+    const code = voucherInput.trim();
+    if (!code || cart.length === 0) return;
+    setValidatingVoucher(true);
+    setVoucherError(null);
+    const res = await validateVoucher(code, cartTotal(cart));
+    if (res.ok) {
+      setVoucher(res.data);
+      setVoucherInput(res.data.code);
+    } else {
+      setVoucher(null);
+      setVoucherError(res.message);
+    }
+    setValidatingVoucher(false);
+  };
+
+  // Quay lại /checkout khi còn phiên SePay đang chờ → khôi phục đúng phiên cũ
+  // (giỏ đã được dọn ngay khi tạo đơn, nên khôi phục dựa trên marker + API).
+  useEffect(() => {
     const pendingOrderId = localStorage.getItem(PENDING_ORDER_KEY);
     const token = getToken();
     if (!pendingOrderId || !token) return;
 
-    fetch(`${API_BASE_URL}/payments/${pendingOrderId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(async (res) => {
-        if (res.status === 401) {
-          clearToken();
+    void fetchPayment(pendingOrderId).then((res) => {
+      if (!res.ok) {
+        if (res.kind === 'unauthenticated') {
           router.push('/login?next=/checkout');
-          return null;
+          return;
         }
-        return res.ok ? res.json() : null;
-      })
-      .then((data) => {
-        if (!data) return;
-        if (data.status === 'PAID') {
-          localStorage.removeItem(PENDING_ORDER_KEY);
-          router.push(`/order-success?orderId=${data.orderId}&transId=${data.transactionId}`);
-        } else if (
-          data.status === 'PENDING' &&
-          data.qrUrl &&
-          new Date(data.expiresAt).getTime() > Date.now()
-        ) {
-          setSession({
-            orderId: data.orderId,
-            paymentCode: data.paymentCode,
-            qrUrl: data.qrUrl,
-            amount: data.amount,
-            expiresAt: data.expiresAt,
-          });
-          setPayStatus('waiting');
-        } else {
-          // EXPIRED / FAILED / không còn phiên hợp lệ → về form trống giỏ
-          localStorage.removeItem(PENDING_ORDER_KEY);
-        }
-      })
-      .catch(() => {
+        // EXPIRED / FAILED / không còn phiên hợp lệ → về form trống giỏ
         localStorage.removeItem(PENDING_ORDER_KEY);
-      });
+        return;
+      }
+      const data = res.data;
+      if (data.status === 'PAID') {
+        localStorage.removeItem(PENDING_ORDER_KEY);
+        router.push(`/order-success?orderId=${data.orderId}&transId=${data.transactionId}`);
+      } else if (
+        data.status === 'PENDING' &&
+        data.qrUrl &&
+        new Date(data.expiresAt ?? '').getTime() > Date.now()
+      ) {
+        setSession({
+          orderId: data.orderId,
+          paymentCode: data.paymentCode ?? '',
+          qrUrl: data.qrUrl,
+          amount: data.amount,
+          expiresAt: data.expiresAt ?? '',
+        });
+        setPayStatus('waiting');
+      } else {
+        localStorage.removeItem(PENDING_ORDER_KEY);
+      }
+    });
     // Chạy đúng một lần lúc mount: session luôn null lúc này, và không được
     // re-run khi người dùng chủ động bấm "chọn lại phương thức" (session về null).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,36 +131,21 @@ export default function CheckoutPage() {
       pollCount += 1;
       if (pollCount % 3 !== 0) return;
 
-      fetch(`${API_BASE_URL}/payments/${session.orderId}`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      })
-        .then(async (res) => {
-          if (res.status === 401) {
-            // Token hết hạn giữa phiên → đăng nhập lại rồi quay tiếp /checkout.
-            stopped = true;
-            clearToken();
-            router.push('/login?next=/checkout');
-            return null;
-          }
-          return res.ok ? res.json() : null;
-        })
-        .then((data) => {
-          if (stopped || !data) return;
-          if (data.status === 'PAID') {
-            stopped = true;
-            localStorage.removeItem(PENDING_ORDER_KEY);
-            router.push(
-              `/order-success?orderId=${data.orderId}&transId=${data.transactionId}`,
-            );
-          } else if (data.status === 'EXPIRED') {
-            setPayStatus('expired');
-          } else if (data.status === 'FAILED') {
-            setPayStatus('failed');
-          }
-        })
-        .catch(() => {
-          // lỗi mạng tạm thời: tiếp tục poll, hết hạn do đếm ngược phía client
-        });
+      void fetchPayment(session.orderId).then((res) => {
+        if (stopped || !res.ok) return;
+        const data = res.data;
+        if (data.status === 'PAID') {
+          stopped = true;
+          localStorage.removeItem(PENDING_ORDER_KEY);
+          router.push(
+            `/order-success?orderId=${data.orderId}&transId=${data.transactionId}`,
+          );
+        } else if (data.status === 'EXPIRED') {
+          setPayStatus('expired');
+        } else if (data.status === 'FAILED') {
+          setPayStatus('failed');
+        }
+      });
     }, 1000);
 
     return () => {
@@ -154,73 +154,50 @@ export default function CheckoutPage() {
     };
   }, [session, payStatus, router]);
 
-  const totalCartPrice = cart.reduce((sum, item) => sum + item.totalPrice, 0);
+  const totalCartPrice = cartTotal(cart);
+  const discountAmount = voucher?.discountAmount ?? 0;
+  const finalTotal = Math.max(0, totalCartPrice - discountAmount);
 
   const handleRemoveItem = (index: number) => {
-    const updatedCart = cart.filter((_, i) => i !== index);
-    setCart(updatedCart);
-    localStorage.setItem('phuclong_cart', JSON.stringify(updatedCart));
+    setCart((current) => current.filter((_, i) => i !== index));
   };
 
-  async function createOrder(token: string) {
-    // Client KHÔNG gửi giá: server tra bảng giá và tự tính unitPrice/total.
-    const orderPayload = {
-      items: cart.map((item) => ({
-        productId: item.product.id,
-        size: item.size,
-        qty: item.quantity,
-        toppings: (item.toppings ?? []).map((topping) => topping.name),
-        note: item.note || undefined,
-      })),
-    };
-
-    const orderRes = await fetch(`${API_BASE_URL}/orders`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(orderPayload),
-    });
-
-    if (orderRes.status === 401) {
-      // Token hết hạn hoặc không hợp lệ → đăng nhập lại.
-      clearToken();
-      router.push('/login?next=/checkout');
-      return null;
-    }
+  async function createOrderAndPay() {
+    // Client KHÔNG gửi giá: server tra bảng giá và tự tính unitPrice/total,
+    // kèm voucherCode (nếu đã áp) để server xác nhận lần cuối.
+    const orderRes = await createOrder(toOrderItems(cart), voucher?.code);
     if (!orderRes.ok) {
-      throw new Error(`Tạo đơn thất bại (${orderRes.status})`);
+      if (orderRes.kind === 'unauthenticated') {
+        clearSessionAndGoLogin();
+        return null;
+      }
+      throw new Error(orderRes.message);
     }
-    return orderRes.json();
+    return orderRes.data;
   }
 
-  async function createSePaySession(orderId: number, token: string) {
-    const res = await fetch(`${API_BASE_URL}/payments/sepay`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ orderId }),
-    });
-    if (res.status === 401) {
-      clearToken();
-      router.push('/login?next=/checkout');
-      return null;
-    }
+  function clearSessionAndGoLogin() {
+    localStorage.removeItem('phuclong_pending_order');
+    router.push('/login?next=/checkout');
+  }
+
+  async function createSePaySession(orderId: number) {
+    const res = await createSePayPayment(orderId);
     if (!res.ok) {
-      throw new Error(`Tạo phiên thanh toán SePay thất bại (${res.status})`);
+      if (res.kind === 'unauthenticated') {
+        clearSessionAndGoLogin();
+        return null;
+      }
+      throw new Error(res.message);
     }
-    return res.json();
+    return res.data;
   }
 
   const handleConfirmPayment = async () => {
     if (cart.length === 0) return;
 
     // Đặt đơn cần đăng nhập: chưa có token thì chuyển sang /login rồi quay lại đây.
-    const token = getToken();
-    if (!token) {
+    if (!getToken()) {
       router.push('/login?next=/checkout');
       return;
     }
@@ -229,19 +206,20 @@ export default function CheckoutPage() {
     setErrorMessage(null);
 
     try {
-      const orderData = await createOrder(token);
+      const orderData = await createOrderAndPay();
       if (!orderData) return;
 
       // Giỏ đã được chốt vào đơn → dọn giỏ NGAY LÚC NÀY, đỡ đợi payment.
       // Từ đây mọi hiển thị (QR, số tiền, retry) dựa trên đơn + phiên SePay,
       // không dựa vào giỏ nữa → không còn "giỏ hàng cũ" tồn đọng.
-      localStorage.removeItem('phuclong_cart');
       setCart([]);
+      setVoucher(null);
+      setVoucherInput('');
 
       if (paymentMethod === 'sepay') {
         // Thanh toán online SePay: tạo phiên QR rồi sang màn hình chờ,
         // đơn chỉ PAID khi webhook SePay xác nhận tiền đã vào tài khoản.
-        const sessionData = await createSePaySession(orderData.id, token);
+        const sessionData = await createSePaySession(orderData.id);
         if (!sessionData) return;
         localStorage.setItem(PENDING_ORDER_KEY, String(sessionData.orderId));
         setSession(sessionData);
@@ -249,28 +227,18 @@ export default function CheckoutPage() {
         return;
       }
 
-      // Luồng momo/card (hoàn tất ngay) giữ nguyên.
+      // Luồng momo/card (hoàn tất ngay) — giờ yêu cầu JWT và chỉ chủ đơn.
       const idempotencyKey = `IDEM-${Date.now()}-${orderData.id}`;
-      const payRes = await fetch(`${API_BASE_URL}/payments`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'idempotency-key': idempotencyKey,
-        },
-        body: JSON.stringify({
-          orderId: orderData.id,
-          method: paymentMethod,
-          idempotencyKey,
-        }),
-      });
-
+      const payRes = await payOrder(orderData.id, paymentMethod, idempotencyKey);
       if (!payRes.ok) {
-        throw new Error(`Xử lý thanh toán thất bại (${payRes.status})`);
+        if (payRes.kind === 'unauthenticated') {
+          clearSessionAndGoLogin();
+          return;
+        }
+        throw new Error(payRes.message);
       }
 
-      const payData = await payRes.json();
-
-      router.push(`/order-success?orderId=${orderData.id}&transId=${payData.transactionId}`);
+      router.push(`/order-success?orderId=${orderData.id}&transId=${payRes.data.transactionId}`);
     } catch (err: unknown) {
       console.error('Payment error:', err);
       const msg = err instanceof Error ? err.message : 'Có lỗi xảy ra trong quá trình thanh toán.';
@@ -282,12 +250,11 @@ export default function CheckoutPage() {
 
   // "Thử lại" sau khi phiên hết hạn/thất bại: tạo phiên mới cho cùng đơn hàng.
   const handleRetrySePay = async () => {
-    const token = getToken();
-    if (!token || !session) return;
+    if (!session) return;
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
-      const sessionData = await createSePaySession(session.orderId, token);
+      const sessionData = await createSePaySession(session.orderId);
       if (!sessionData) return;
       localStorage.setItem(PENDING_ORDER_KEY, String(sessionData.orderId));
       setSession(sessionData);
@@ -305,26 +272,15 @@ export default function CheckoutPage() {
   // Backend tự chặn endpoint này khi NODE_ENV=production.
   const handleSimulateTransfer = async () => {
     if (!session) return;
-    const token = getToken();
-    if (!token) {
+    if (!getToken()) {
       router.push('/login?next=/checkout');
       return;
     }
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/payments/sepay/simulate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ orderId: session.orderId }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.message || `Mô phỏng thất bại (${res.status})`);
-      }
+      const res = await simulateSePay(session.orderId);
+      if (!res.ok) throw new Error(res.message);
       // Poll 3 giây/lần sẽ bắt được PAID và chuyển sang trang thành công.
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Mô phỏng chuyển khoản thất bại.';
@@ -334,23 +290,11 @@ export default function CheckoutPage() {
     }
   };
 
-  const header = (
-    <header className="bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center">
-      <div className="flex items-center space-x-2 cursor-pointer" onClick={() => router.push('/')}>
-        <span className="bg-[#006A32] text-white px-2.5 py-1 rounded-md font-bold text-sm">PL</span>
-        <span className="font-bold tracking-wider text-gray-900">PHÚC LONG</span>
-      </div>
-      <button onClick={() => router.push('/')} className="text-sm font-semibold text-[#006A32]">
-        ← Quay lại menu
-      </button>
-    </header>
-  );
-
   // ===== MÀN HÌNH QR SEPAY (đang chờ chuyển khoản hoặc hết hạn/thất bại) =====
   if (session) {
     return (
       <div className="min-h-screen bg-[#F7F6F2] text-gray-900">
-        {header}
+        <SiteHeader />
         <main className="max-w-md mx-auto px-6 py-10">
           <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm text-center space-y-5">
             <span className="inline-block text-xs font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-3 py-1 rounded-full">
@@ -456,7 +400,7 @@ export default function CheckoutPage() {
   // ===== FORM XÁC NHẬN ĐƠN =====
   return (
     <div className="min-h-screen bg-[#F7F6F2] text-gray-900">
-      {header}
+      <SiteHeader />
 
       <main className="max-w-5xl mx-auto px-6 py-10 space-y-6">
         <div className="text-center space-y-1">
@@ -495,7 +439,7 @@ export default function CheckoutPage() {
 
               <div className="space-y-4 max-h-[400px] overflow-y-auto pr-1">
                 {cart.map((item, index) => (
-                  <div key={index} className="flex items-center space-x-4 border-b border-gray-50 pb-4">
+                  <div key={item.id} className="flex items-center space-x-4 border-b border-gray-50 pb-4">
                     <img src={item.product.image} alt={item.product.name} className="w-16 h-16 rounded-2xl object-cover bg-gray-100" />
                     <div className="flex-1">
                       <h4 className="font-bold text-sm">{item.product.name}</h4>
@@ -519,6 +463,38 @@ export default function CheckoutPage() {
             {/* Cột phải: Thanh toán */}
             <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-6">
               <h2 className="text-lg font-bold border-b pb-4">Tóm tắt đơn hàng</h2>
+
+              {/* Voucher */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase text-gray-400 block">Mã giảm giá</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={voucherInput}
+                    onChange={(e) => setVoucherInput(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void applyVoucher();
+                    }}
+                    placeholder="VD: WELCOME10"
+                    className="flex-1 px-4 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-[#006A32]"
+                  />
+                  <button
+                    onClick={applyVoucher}
+                    disabled={validatingVoucher || !voucherInput.trim()}
+                    className="px-4 py-2.5 rounded-xl text-sm font-bold border border-[#006A32]/40 text-[#006A32] hover:bg-[#006A32]/5 transition disabled:opacity-50"
+                  >
+                    {validatingVoucher ? '...' : 'Áp dụng'}
+                  </button>
+                </div>
+                {voucherError && (
+                  <p role="alert" className="text-[11px] text-red-600">⚠️ {voucherError}</p>
+                )}
+                {voucher && (
+                  <p className="text-[11px] text-emerald-700">
+                    ✓ Đã áp dụng <span className="font-bold">{voucher.code}</span> — giảm {formatVnd(voucher.discountAmount)} (server sẽ tính lại khi tạo đơn)
+                  </p>
+                )}
+              </div>
 
               <div className="space-y-2">
                 <label className="text-xs font-bold uppercase text-gray-400 block">Phương thức thanh toán</label>
@@ -572,15 +548,21 @@ export default function CheckoutPage() {
               <div className="space-y-2 text-xs border-t pt-4">
                 <div className="flex justify-between text-gray-500">
                   <span>Tạm tính</span>
-                  <span>{totalCartPrice.toLocaleString('vi-VN')}₫</span>
+                  <span>{formatVnd(totalCartPrice)}</span>
                 </div>
+                {voucher && discountAmount > 0 && (
+                  <div className="flex justify-between text-emerald-700 font-semibold">
+                    <span>Giảm giá ({voucher.code})</span>
+                    <span>-{formatVnd(discountAmount)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-gray-500">
                   <span>Phí dịch vụ</span>
                   <span>0₫</span>
                 </div>
                 <div className="flex justify-between font-bold text-base text-gray-900 pt-2 border-t">
                   <span>Tổng cộng</span>
-                  <span className="text-[#006A32] text-xl font-extrabold">{totalCartPrice.toLocaleString('vi-VN')}₫</span>
+                  <span className="text-[#006A32] text-xl font-extrabold">{formatVnd(finalTotal)}</span>
                 </div>
               </div>
 
@@ -590,7 +572,7 @@ export default function CheckoutPage() {
                 className={`w-full py-3.5 rounded-2xl font-bold shadow-lg transition flex justify-center items-center space-x-2 text-white ${isSubmitting ? 'bg-stone-400 cursor-not-allowed' : 'bg-[#006A32] hover:bg-[#005227]'
                   }`}
               >
-                <span>{isSubmitting ? 'Đang xử lý thanh toán...' : 'Xác nhận trả'}</span>
+                <span>{isSubmitting ? 'Đang xử lý thanh toán...' : `Xác nhận trả ${formatVnd(finalTotal)}`}</span>
                 {!isSubmitting && <span>›</span>}
               </button>
             </div>
