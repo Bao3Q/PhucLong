@@ -5,7 +5,7 @@
 | **Thời gian** | 13/11/2026 – 15/11/2026 |
 | **Sprint Goal** | Hoàn thành luồng end-to-end, tự động hóa đóng gói và triển khai một phiên bản production truy cập được (Task 5). |
 | **Thành viên** | Gia Báo · Nguyễn Thành Lộc · Anh Đức · Khánh Duy · Phan Tiến Đạt |
-| **Ngày họp Review / Retro** | 15/11/2026 |
+| **Ngày họp Review / Retro** | *(điền ngày họp)* |
 | **Phiên bản** | v1.0.0 – [release notes](../release-notes/v1.0.0.md) |
 
 > “Đã bàn giao” lấy từ lịch sử commit/PR. Phần phản hồi và retro là bản nháp đề xuất — **nhóm sửa lại theo biên bản họp thật**.
@@ -31,22 +31,19 @@
 3. Pipeline CD: push tag `v1.0.0` → image `sha-…` trên GHCR → deploy → smoke test xanh.
 
 ### Phản hồi của khách hàng / giảng viên
-- Hệ thống đáp ứng tốt luồng mua hàng end-to-end từ xem menu, tùy chọn sản phẩm, giỏ hàng đến thanh toán và theo dõi đơn hàng.
-- Pipeline CD hoạt động tự động, có kiểm thử smoke test và phương án rollback an toàn khi xảy ra lỗi cấu hình.
-- Cần tiếp tục duy trì việc cập nhật tài liệu kỹ thuật đồng bộ với mã nguồn ở các phiên bản tiếp theo.
+- *(ghi lại phản hồi thật trong buổi review)*
 
 ### Sự cố trong Sprint
 - **15/11 – web production không gọi được API**: sau khi siết CORS về `CORS_ORIGIN`, biến này trên Render chưa có domain Vercel nên trình duyệt chặn request. Khắc phục: đặt `CORS_ORIGIN` (hoặc dùng proxy `API_PROXY_TARGET`); bổ sung kiểm tra CORS vào smoke test của CD để phát hiện ngay sau deploy.
 
 ### Chưa xong / tồn đọng
-- Tối ưu hóa thời gian khởi động (cold start ~30s) trên hạ tầng Render Free tier.
-- Bổ sung bộ kiểm thử tự động đo lường hiệu năng p95 dưới 500ms (NFR-01) ở Sprint sau.
+- *(bổ sung theo backlog thực tế)*
 
 ## 2. Sprint Retrospective
 
 | Điều làm tốt | Điều chưa tốt | Hành động cải tiến | Người phụ trách |
 | --- | --- | --- | --- |
-| Hoàn thành đủ luồng end-to-end, có production chạy được | Thay đổi cấu hình (CORS) đi thẳng lên production mà không có kiểm tra sau deploy | Smoke test tự động (đã thêm), checklist biến môi trường khi đổi cấu hình bảo mật | Gia Báo |
-| Làm việc qua pull request (#1–#7), có review | Nhiều tính năng dồn vào 2 ngày cuối | Chia nhỏ issue, cập nhật board hằng ngày | Phan Tiến Đạt |
-| Thanh toán có idempotency + transaction, có test | Test frontend và E2E bổ sung muộn | Viết test cùng lúc với tính năng (đưa vào Definition of Done) | Anh Đức |
-| Có tài liệu triển khai và rollback | Một số tài liệu (README, traceability) cập nhật chậm so với code | Mỗi PR cập nhật README/traceability nếu đổi API hoặc tính năng | Nguyễn Thành Lộc |
+| Hoàn thành đủ luồng end-to-end, có production chạy được | Thay đổi cấu hình (CORS) đi thẳng lên production mà không có kiểm tra sau deploy | Smoke test tự động (đã thêm), checklist biến môi trường khi đổi cấu hình bảo mật | *(điền)* |
+| Làm việc qua pull request (#1–#7), có review | Nhiều tính năng dồn vào 2 ngày cuối | Chia nhỏ issue, cập nhật board hằng ngày | *(điền)* |
+| Thanh toán có idempotency + transaction, có test | Test frontend và E2E bổ sung muộn | Viết test cùng lúc với tính năng (đưa vào Definition of Done) | *(điền)* |
+| Có tài liệu triển khai và rollback | Một số tài liệu (README, traceability) cập nhật chậm so với code | Mỗi PR cập nhật README/traceability nếu đổi API hoặc tính năng | *(điền)* |
