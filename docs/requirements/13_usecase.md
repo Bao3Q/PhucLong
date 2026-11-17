@@ -78,7 +78,7 @@ Nguồn: [`docs/diagrams/Task1_3_UseCase.puml`](../diagrams/Task1_3_UseCase.puml
 | Mã | Tại bước | Điều kiện | Xử lý |
 | --- | --- | --- | --- |
 | A1 | 3 | Client gửi lại yêu cầu với **cùng Idempotency-Key** (mất mạng, bấm hai lần) | API trả lại đúng kết quả lần đầu (cùng `transactionId`), không trừ tiền/kho lần hai. |
-| A2 | 1 | Khách chọn chuyển khoản QR SePay (FR-10) | `POST /payments/sepay` tạo mã QR hiệu lực 2 phút; đơn chuyển PAID khi webhook SePay xác nhận đã nhận đủ tiền; quá hạn hoặc thiếu tiền thì đơn giữ PENDING và khách có thể tạo lại mã QR (sơ đồ `Task2_1_Activity_SePay`). |
+| A2 | 1 | Khách chọn chuyển khoản QR SePay (FR-10) | `POST /payments/sepay/checkout` tạo mã QR hiệu lực 2 phút; đơn chuyển PAID khi webhook SePay xác nhận đã nhận đủ tiền; quá hạn hoặc thiếu tiền thì đơn giữ PENDING và khách có thể tạo lại mã QR (sơ đồ `Task2_1_Activity_SePay`). |
 
 **Luồng ngoại lệ**
 

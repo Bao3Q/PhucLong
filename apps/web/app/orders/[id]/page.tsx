@@ -90,6 +90,8 @@ function OrderConfirmationContent() {
     const order = result.data;
     const info = statusInfo(order.status);
     const waiting = order.status === 'PENDING';
+    // Đơn chưa trả tiền (hoặc phiên SePay trước đã hết hạn) → quay lại trang QR để thanh toán.
+    const payable = waiting || order.status === 'PAYMENT_FAILED';
     content = (
       <div className="bg-white rounded-3xl border border-stone-200/80 shadow-xl overflow-hidden">
         <div className="p-8 text-center space-y-3 border-b border-dashed border-stone-200">
@@ -149,6 +151,17 @@ function OrderConfirmationContent() {
             </div>
           )}
         </div>
+
+        {payable && (
+          <div className="px-6 pb-4">
+            <button
+              onClick={() => router.push(`/payments/sepay/${order.id}`)}
+              className="w-full py-3 rounded-2xl font-bold text-sm bg-[#006A32] hover:bg-[#005227] text-white"
+            >
+              Thanh toán chuyển khoản (SePay)
+            </button>
+          </div>
+        )}
 
         <div className="p-6 pt-0 grid grid-cols-2 gap-3">
           <button onClick={() => router.push('/orders')} className="py-3 rounded-2xl font-bold text-sm border border-stone-300 hover:bg-stone-50">

@@ -10,8 +10,10 @@ import { OrdersService } from './orders.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
- * Dọn đơn PENDING bỏ quên: tồn kho bị một đơn không bao giờ thanh toán giữ
- * mãi sẽ khiến menu "hết hàng" ảo. Service tự hủy đơn PENDING quá hạn,
+ * Dọn đơn bỏ quên: tồn kho bị một đơn không bao giờ thanh toán giữ mãi sẽ khiến
+ * menu "hết hàng" ảo. Service tự hủy đơn PENDING / PAYMENT_FAILED (phiên SePay đã
+ * hết hạn mà khách không thanh toán lại) quá hạn — trừ đơn đang có phiên QR còn
+ * hiệu lực —
  * hoàn lại tồn kho (qua luồng CANCELLED chuẩn của OrdersService) và đánh dấu
  * các phiên SePay đang chờ của đơn đó thành EXPIRED.
  *
@@ -60,7 +62,12 @@ export class OrderExpiryService
 
     const cutoff = new Date(Date.now() - ttlMinutes * 60_000);
     const staleOrders = await this.prisma.order.findMany({
-      where: { status: OrderStatus.PENDING, createdAt: { lt: cutoff } },
+      where: {
+        status: { in: [OrderStatus.PENDING, OrderStatus.PAYMENT_FAILED] },
+        createdAt: { lt: cutoff },
+        // Đang chờ khách quét QR (phiên còn hạn) thì chưa được hủy.
+        payments: { none: { status: 'PENDING', expiresAt: { gt: new Date() } } },
+      },
       select: { id: true },
       take: OrderExpiryService.BATCH_SIZE,
     });
