@@ -1,20 +1,18 @@
 import {
   BadRequestException,
   ForbiddenException,
-  Inject,
   Injectable,
   NotFoundException,
-  Optional,
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { LoyaltyTransactionType, Prisma, ProductSize } from '../generated/prisma/client';
 import { OrdersService } from '../orders/orders.service';
 import { Order, OrderStatus } from '../orders/entities/order.entity';
 import type { AuthUser } from '../common/auth/auth-user.interface';
-import { UsersRepository } from '../auth/users.repository';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   PaymentRecord,
+  PaymentStatus,
   SePaySession,
   SePayWebhookPayload,
 } from './payments.data';
@@ -46,8 +44,7 @@ function isUniqueViolation(error: unknown): boolean {
 export class PaymentsService {
   constructor(
     private readonly ordersService: OrdersService,
-    @Optional() @Inject(PrismaService) private readonly prisma?: PrismaService | null,
-    @Optional() private readonly usersRepository?: UsersRepository,
+    private readonly prisma: PrismaService,
   ) {}
 
   async processPayment(
@@ -59,82 +56,78 @@ export class PaymentsService {
     // Có user (route có JWT) → chỉ chủ đơn hoặc ADMIN được thanh toán.
     const order = await this.ordersService.findOne(orderId, user);
 
+    const payMethod = method || 'card';
     // Vân tay nội dung: cùng key nhưng khác nội dung (đơn/method) là bị cấm.
-    const requestFingerprint = `${order.id}:${method || 'card'}`;
+    const requestFingerprint = `${order.id}:${payMethod}`;
 
     // Replay phải đứng TRƯỚC mọi chặn nghiệp vụ: client retry sau timeout
     // (khi đơn đã PAID) vẫn phải nhận lại kết quả đã lưu chứ không phải lỗi.
     if (idempotencyKey) {
-      const existing = await this.prisma.payment.findFirst({
-        where: { userId: order.userId, idempotencyKey },
-        orderBy: { createdAt: 'desc' },
-      });
-      if (existing) {
-        if (existing.requestFingerprint !== requestFingerprint) {
-          throw new BadRequestException(
-            'Idempotency-Key đã được dùng cho một yêu cầu khác, vui lòng dùng khóa mới.',
-          );
-        }
-        return this.toPaymentRecord(existing); // replay kết quả đã lưu
-      }
+      const replay = await this.findReplay(order.userId, idempotencyKey, requestFingerprint);
+      if (replay) return replay;
     }
 
     if (order.status === OrderStatus.PAID) {
       throw new BadRequestException('Đơn hàng này đã được thanh toán trước đó.');
     }
 
-    const transactionId = `TXN-${(method || 'CARD').toUpperCase()}-${Date.now().toString().slice(-6)}`;
+    const transactionId = `TXN-${payMethod.toUpperCase()}-${Date.now().toString().slice(-6)}`;
 
-    let payment;
     try {
       // Trừ kho + đổi trạng thái đơn + ghi nhận thanh toán trong một transaction:
       // thiếu nguyên liệu/ly ở bất kỳ bước nào thì tất cả được rollback.
-      payment = await this.prisma.$transaction(async (tx) => {
+      const payment = await this.prisma.$transaction(async (tx) => {
         await this.deductInventory(tx, order);
-
-        const paidOrder = await this.ordersService.updateStatus(
-          order.id,
-          OrderStatus.PAID,
-          tx,
-        );
-        await this.awardLoyaltyPoints(tx, paidOrder.userId, paidOrder.id, paidOrder.total);
+        await this.ordersService.updateStatus(order.id, OrderStatus.PAID, tx);
+        await this.awardLoyaltyPoints(tx, order.userId, order.id, order.total);
 
         return tx.payment.create({
           data: {
-            userId: paidOrder.userId,
-            orderId: paidOrder.id,
-            method: method || 'card',
+            userId: order.userId,
+            orderId: order.id,
+            method: payMethod,
             success: true,
             idempotencyKey,
             requestFingerprint,
             result: { transactionId, status: 'SUCCEEDED' },
-            amount: paidOrder.total,
+            amount: order.total,
             status: 'PAID',
             paidAt: new Date(),
           },
         });
       });
+      return this.toPaymentRecord(payment);
     } catch (error) {
       // Hai request dùng chung key chạm vạch đua: unique (userId, idempotencyKey)
       // chặn bên thứ hai — replay kết quả của bên đã ghi thay vì lỗi 500.
       if (idempotencyKey && isUniqueViolation(error)) {
-        const winner = await this.prisma.payment.findFirst({
-          where: { userId: order.userId, idempotencyKey },
-          orderBy: { createdAt: 'desc' },
-        });
-        if (winner) {
-          if (winner.requestFingerprint !== requestFingerprint) {
-            throw new BadRequestException(
-              'Idempotency-Key đã được dùng cho một yêu cầu khác, vui lòng dùng khóa mới.',
-            );
-          }
-          return this.toPaymentRecord(winner);
-        }
+        const replay = await this.findReplay(order.userId, idempotencyKey, requestFingerprint);
+        if (replay) return replay;
       }
       throw error;
     }
+  }
 
-    return this.toPaymentRecord(payment);
+  /**
+   * Payment đã lưu cho (user, idempotencyKey): cùng nội dung → trả lại để replay,
+   * khác nội dung → 400, chưa có → null. (userId, idempotencyKey) là unique nên
+   * tối đa một dòng.
+   */
+  private async findReplay(
+    userId: string,
+    idempotencyKey: string,
+    requestFingerprint: string,
+  ): Promise<PaymentRecord | null> {
+    const existing = await this.prisma.payment.findFirst({
+      where: { userId, idempotencyKey },
+    });
+    if (!existing) return null;
+    if (existing.requestFingerprint !== requestFingerprint) {
+      throw new BadRequestException(
+        'Idempotency-Key đã được dùng cho một yêu cầu khác, vui lòng dùng khóa mới.',
+      );
+    }
+    return this.toPaymentRecord(existing);
   }
 
   /**
@@ -147,48 +140,61 @@ export class PaymentsService {
     tx: Prisma.TransactionClient,
     order: Order,
   ): Promise<void> {
-    // Gom nhu cầu theo cặp (productId, size) vì các món trùng sẽ trừ chung
-    const needs = new Map<string, { productId: string; size: ProductSize; qty: number }>();
+    // Gom nhu cầu: ly theo size, công thức theo (productId, size) — các món
+    // trùng trừ chung để số truy vấn không tăng theo số dòng trong đơn.
+    const cups = new Map<ProductSize, number>();
+    const variants = new Map<string, { productId: string; size: ProductSize; qty: number }>();
     for (const item of order.items) {
+      cups.set(item.size, (cups.get(item.size) ?? 0) + item.qty);
       const key = `${item.productId}:${item.size}`;
-      const existing = needs.get(key);
-      if (existing) {
-        existing.qty += item.qty;
+      const variant = variants.get(key);
+      if (variant) {
+        variant.qty += item.qty;
       } else {
-        needs.set(key, {
-          productId: item.productId,
-          size: item.size,
-          qty: item.qty,
-        });
+        variants.set(key, { productId: item.productId, size: item.size, qty: item.qty });
       }
     }
 
-    for (const need of needs.values()) {
+    // Một truy vấn lấy công thức của mọi món, rồi cộng dồn theo nguyên liệu.
+    const recipes = await tx.recipeItem.findMany({
+      where: {
+        OR: [...variants.values()].map(({ productId, size }) => ({ productId, size })),
+      },
+    });
+    const ingredients = new Map<number, Prisma.Decimal>();
+    for (const recipe of recipes) {
+      const { qty } = variants.get(`${recipe.productId}:${recipe.size}`)!;
+      ingredients.set(
+        recipe.ingredientId,
+        (ingredients.get(recipe.ingredientId) ?? new Prisma.Decimal(0)).add(
+          recipe.amount.mul(qty),
+        ),
+      );
+    }
+
+    // Trừ theo thứ tự cố định để hai thanh toán song song không khóa chéo nhau.
+    for (const [size, qty] of [...cups].sort(([a], [b]) => a.localeCompare(b))) {
       const cup = await tx.cup.updateMany({
-        where: { size: need.size, quantity: { gte: need.qty } },
-        data: { quantity: { decrement: need.qty } },
+        where: { size, quantity: { gte: qty } },
+        data: { quantity: { decrement: qty } },
       });
       if (cup.count === 0) {
         throw new BadRequestException(
-          `Hết ly size ${need.size}, không thể xử lý thanh toán cho đơn hàng này.`,
+          `Hết ly size ${size}, không thể xử lý thanh toán cho đơn hàng này.`,
         );
       }
-
-      const recipes = await tx.recipeItem.findMany({
-        where: { productId: need.productId, size: need.size },
-        include: { ingredient: true },
+    }
+    for (const [id, amount] of [...ingredients].sort(([a], [b]) => a - b)) {
+      const ingredient = await tx.ingredient.updateMany({
+        where: { id, quantity: { gte: amount } },
+        data: { quantity: { decrement: amount } },
       });
-      for (const recipe of recipes) {
-        const amount = recipe.amount.mul(need.qty);
-        const ingredient = await tx.ingredient.updateMany({
-          where: { id: recipe.ingredientId, quantity: { gte: amount } },
-          data: { quantity: { decrement: amount } },
-        });
-        if (ingredient.count === 0) {
-          throw new BadRequestException(
-            `Nguyên liệu "${recipe.ingredient.name}" không đủ số lượng, không thể xử lý thanh toán cho đơn hàng này.`,
-          );
-        }
+      if (ingredient.count === 0) {
+        // Chỉ tra tên khi lỗi — đường thành công không cần.
+        const found = await tx.ingredient.findUnique({ where: { id }, select: { name: true } });
+        throw new BadRequestException(
+          `Nguyên liệu "${found?.name ?? id}" không đủ số lượng, không thể xử lý thanh toán cho đơn hàng này.`,
+        );
       }
     }
   }
@@ -207,13 +213,12 @@ export class PaymentsService {
     const points = Math.floor(total / LOYALTY_EARN_UNIT);
     if (points <= 0) return;
 
-    const user = await tx.user.findUnique({ where: { id: userId } });
-    if (!user) return; // user đã bị xóa giữa chừng — bỏ qua, không chặn payment
-
-    const balanceAfter = user.loyaltyPoints + points;
-    await tx.user.update({
+    // increment nguyên tử và trả luôn số dư mới: không cần đọc trước (và
+    // balanceAfter đúng cả khi hai đơn của cùng user thanh toán song song).
+    const { loyaltyPoints } = await tx.user.update({
       where: { id: userId },
       data: { loyaltyPoints: { increment: points } },
+      select: { loyaltyPoints: true },
     });
     await tx.loyaltyTransaction.create({
       data: {
@@ -221,7 +226,7 @@ export class PaymentsService {
         orderId,
         type: LoyaltyTransactionType.EARN,
         points,
-        balanceAfter,
+        balanceAfter: loyaltyPoints,
         description: `Tích điểm từ đơn #${orderId}`,
       },
     });
@@ -231,9 +236,7 @@ export class PaymentsService {
   async getLoyaltyPoints(
     user: AuthUser,
   ): Promise<{ userId: string; loyaltyPoints: number }> {
-    const found = this.prisma
-      ? await this.prisma.user.findUnique({ where: { id: user.id } })
-      : ((await this.usersRepository?.findById(user.id)) ?? null);
+    const found = await this.prisma.user.findUnique({ where: { id: user.id } });
     if (!found) {
       throw new NotFoundException('Không tìm thấy người dùng');
     }
@@ -297,97 +300,80 @@ export class PaymentsService {
 
   /**
    * Webhook SePay gọi khi tài khoản nhận tiền có biến động (auth đã được
-   * SepayWebhookGuard kiểm tra bằng khóa API). Điều kiện response: HTTP 200 +
-   * body {"success": true}, nên mọi nhánh nghiệp vụ đều trả success:true.
+   * SepayWebhookGuard kiểm tra bằng khóa API). Mọi nhánh nghiệp vụ đều trả
+   * bình thường (controller luôn phản hồi HTTP 200 {"success": true}); chỉ lỗi hạ tầng
+   * (DB, hết kho …) mới ném — transaction rollback, phiên vẫn PENDING và SePay sẽ retry.
    */
-  async handleWebhook(payload: SePayWebhookPayload): Promise<{ success: true }> {
+  async handleWebhook(payload: SePayWebhookPayload): Promise<void> {
     // Chỉ quan tâm tiền VÀO tài khoản.
-    if (payload.transferType !== 'in') {
-      return { success: true };
-    }
+    if (payload.transferType !== 'in') return;
 
     const paymentCode = this.extractPaymentCode(payload);
-    if (!paymentCode) {
-      return { success: true }; // chuyển khoản lạ, không thuộc đơn nào
-    }
+    if (!paymentCode) return; // chuyển khoản lạ, không thuộc đơn nào
 
     const payment = await this.prisma.payment.findUnique({
       where: { paymentCode },
     });
-    if (!payment || payment.status !== 'PENDING') {
-      return { success: true }; // không tồn tại hoặc đã xử lý (webhook trùng)
-    }
+    if (!payment || payment.status !== 'PENDING') return; // không có hoặc đã xử lý (webhook trùng)
 
     const expired = !!payment.expiresAt && payment.expiresAt.getTime() < Date.now();
     const underpaid =
       typeof payload.transferAmount === 'number' && payload.transferAmount < payment.amount;
-
     if (expired || underpaid) {
-      await this.prisma.payment.update({
-        where: { id: payment.id },
+      await this.settle(payment, expired ? 'EXPIRED' : 'FAILED', {
+        sepayTransactionId: payload.id ?? null,
+        reason: expired
+          ? 'Hết thời hạn thanh toán 2 phút'
+          : 'Số tiền chuyển khoản nhỏ hơn số tiền cần thanh toán',
+      });
+      return;
+    }
+
+    // Đọc đơn TRƯỚC transaction để transaction (giữ khóa dòng payment) ngắn nhất có thể.
+    const order = await this.ordersService.findOne(payment.orderId);
+    if (order.status === OrderStatus.PAID) {
+      // Đơn đã được trả bằng luồng khác (momo/card) — không hoàn tất lại.
+      await this.settle(payment, 'FAILED', { reason: 'Đơn hàng đã được thanh toán' });
+      return;
+    }
+
+    // Claim + trừ kho + đổi trạng thái đơn trong một transaction: thiếu nguyên
+    // liệu/ly (hoặc đơn vừa được trả ở nơi khác) thì rollback cả claim.
+    await this.prisma.$transaction(async (tx) => {
+      // Chiếm quyền xử lý bằng update có điều kiện: nếu webhook trùng chạy
+      // song song thì chỉ một bên claim thành công (count > 0).
+      const claim = await tx.payment.updateMany({
+        where: { id: payment.id, status: 'PENDING' },
         data: {
-          status: expired ? 'EXPIRED' : 'FAILED',
+          status: 'PAID',
+          success: true,
+          paidAt: new Date(),
           result: {
             ...asRecord(payment.result),
-            status: expired ? 'EXPIRED' : 'FAILED',
-            sepayTransactionId: payload.id ?? null,
-            reason: expired
-              ? 'Hết thời hạn thanh toán 2 phút'
-              : 'Số tiền chuyển khoản nhỏ hơn số tiền cần thanh toán',
+            status: 'PAID',
+            transactionId: `TXN-SEPAY-${payload.id ?? Date.now()}`,
+            sepayReferenceCode: payload.referenceCode ?? null,
           },
         },
       });
-      return { success: true };
-    }
+      if (claim.count === 0) return; // đã có webhook khác xử lý
 
-    try {
-      await this.prisma.$transaction(async (tx) => {
-        // Chiếm quyền xử lý bằng update có điều kiện: nếu webhook trùng chạy
-        // song song thì chỉ một bên claim thành công (count > 0).
-        const claim = await tx.payment.updateMany({
-          where: { id: payment.id, status: 'PENDING' },
-          data: {
-            status: 'PAID',
-            success: true,
-            paidAt: new Date(),
-            result: {
-              ...asRecord(payment.result),
-              status: 'PAID',
-              transactionId: `TXN-SEPAY-${payload.id ?? Date.now()}`,
-              sepayReferenceCode: payload.referenceCode ?? null,
-            },
-          },
-        });
-        if (claim.count === 0) {
-          return; // đã có webhook khác xử lý
-        }
+      await this.deductInventory(tx, order);
+      await this.ordersService.updateStatus(order.id, OrderStatus.PAID, tx);
+      await this.awardLoyaltyPoints(tx, order.userId, order.id, order.total);
+    });
+  }
 
-        const order = await this.ordersService.findOne(payment.orderId);
-        if (order.status === OrderStatus.PAID) {
-          // Đơn đã được trả bằng luồng khác (momo/card) — không hoàn tất lại.
-          await tx.payment.update({
-            where: { id: payment.id },
-            data: { status: 'FAILED', result: { ...asRecord(payment.result), status: 'FAILED', reason: 'Đơn hàng đã được thanh toán' } },
-          });
-          return;
-        }
-
-        // Trừ kho + đổi trạng thái đơn trong cùng transaction với claim:
-        // hết nguyên liệu/ly thì toàn bộ rollback, phiên vẫn PENDING.
-        await this.deductInventory(tx, order);
-        await this.ordersService.updateStatus(order.id, OrderStatus.PAID, tx);
-        await this.awardLoyaltyPoints(tx, order.userId, order.id, order.total);
-      });
-    } catch (error) {
-      // Tiền đã vào nhưng không fulfill được → đánh dấu FAILED để tránh retry vô ích.
-      await this.prisma.payment.updateMany({
-        where: { id: payment.id, status: 'PAID' },
-        data: { status: 'FAILED', success: false },
-      });
-      throw error;
-    }
-
-    return { success: true };
+  /** Chốt một phiên PENDING thành EXPIRED/FAILED, giữ nguyên các trường của result cũ. */
+  private settle(
+    payment: { id: number; result: unknown },
+    status: 'EXPIRED' | 'FAILED',
+    extra: Record<string, string | number | null> = {},
+  ) {
+    return this.prisma.payment.update({
+      where: { id: payment.id },
+      data: { status, result: { ...asRecord(payment.result), status, ...extra } },
+    });
   }
 
   /** Khớp mã thanh toán từ trường `code` hoặc nội dung chuyển khoản. */
@@ -423,13 +409,14 @@ export class PaymentsService {
       );
     }
 
-    return this.handleWebhook({
+    await this.handleWebhook({
       id: Date.now(),
       code: payment.paymentCode,
       transferType: 'in',
       transferAmount: payment.amount,
       referenceCode: `SIM-${Date.now()}`,
     });
+    return { success: true };
   }
 
   async getByOrderId(
@@ -453,13 +440,7 @@ export class PaymentsService {
       payment.expiresAt &&
       payment.expiresAt.getTime() < Date.now()
     ) {
-      await this.prisma.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: 'EXPIRED',
-          result: { ...asRecord(payment.result), status: 'EXPIRED' },
-        },
-      });
+      await this.settle(payment, 'EXPIRED');
       payment.status = 'EXPIRED';
     }
 
@@ -471,8 +452,7 @@ export class PaymentsService {
     orderId: number;
     method: string;
     amount: number;
-    success: boolean;
-    status?: string;
+    status: string;
     result: unknown;
     idempotencyKey: string | null;
     createdAt: Date;
@@ -483,14 +463,12 @@ export class PaymentsService {
       transactionId?: string;
       qrUrl?: string;
     };
-    const status = (payment.status as PaymentRecord['status']) ??
-      (payment.success ? 'PAID' : 'FAILED');
     return {
       id: payment.id,
       orderId: payment.orderId,
-      method: payment.method as 'momo' | 'card' | 'sepay',
+      method: payment.method as PaymentRecord['method'],
       amount: payment.amount,
-      status,
+      status: payment.status as PaymentStatus,
       transactionId: result.transactionId ?? `TXN-${payment.id}`,
       idempotencyKey: payment.idempotencyKey ?? undefined,
       createdAt: payment.createdAt.toISOString(),

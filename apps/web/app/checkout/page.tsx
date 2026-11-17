@@ -10,6 +10,7 @@ import {
   payOrder,
   simulateSePay,
   validateVoucher,
+  type ApiResult,
   type SePaySession,
   type VoucherValidation,
 } from '@/lib/api';
@@ -22,6 +23,18 @@ const PENDING_ORDER_KEY = 'phuclong_pending_order';
 
 type PaymentMethod = 'momo' | 'card' | 'sepay';
 type PayStatus = 'waiting' | 'expired' | 'failed';
+
+const PAYMENT_METHODS: {
+  id: PaymentMethod;
+  title: string;
+  hint: string;
+  icon: string;
+  iconBg: string;
+}[] = [
+  { id: 'sepay', title: 'Chuyển khoản ngân hàng', hint: 'SePay — quét QR, tự xác nhận trong 2 phút', icon: '₫', iconBg: 'bg-[#006A32]' },
+  { id: 'momo', title: 'Ví điện tử', hint: 'MoMo / ZaloPay', icon: 'M', iconBg: 'bg-pink-600' },
+  { id: 'card', title: 'Thẻ ngân hàng', hint: 'Visa / Mastercard / Napas', icon: '💳', iconBg: 'bg-blue-600' },
+];
 
 function formatCountdown(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
@@ -176,35 +189,19 @@ export default function CheckoutPage() {
     setCart((current) => current.filter((_, i) => i !== index));
   };
 
-  async function createOrderAndPay() {
-    // Client KHÔNG gửi giá: server tra bảng giá và tự tính unitPrice/total,
-    // kèm voucherCode (nếu đã áp) để server xác nhận lần cuối.
-    const orderRes = await createOrder(toOrderItems(cart), voucher?.code);
-    if (!orderRes.ok) {
-      if (orderRes.kind === 'unauthenticated') {
-        clearSessionAndGoLogin();
-        return null;
-      }
-      throw new Error(orderRes.message);
-    }
-    return orderRes.data;
-  }
-
   function clearSessionAndGoLogin() {
-    localStorage.removeItem('phuclong_pending_order');
+    localStorage.removeItem(PENDING_ORDER_KEY);
     router.push('/login?next=/checkout');
   }
 
-  async function createSePaySession(orderId: number) {
-    const res = await createSePayPayment(orderId);
-    if (!res.ok) {
-      if (res.kind === 'unauthenticated') {
-        clearSessionAndGoLogin();
-        return null;
-      }
-      throw new Error(res.message);
+  /** Lấy data từ kết quả API: 401 → sang /login (trả null), lỗi khác → throw message. */
+  function unwrap<T>(res: ApiResult<T>): T | null {
+    if (res.ok) return res.data;
+    if (res.kind === 'unauthenticated') {
+      clearSessionAndGoLogin();
+      return null;
     }
-    return res.data;
+    throw new Error(res.message);
   }
 
   const handleConfirmPayment = async () => {
@@ -220,7 +217,9 @@ export default function CheckoutPage() {
     setErrorMessage(null);
 
     try {
-      const orderData = await createOrderAndPay();
+      // Client KHÔNG gửi giá: server tra bảng giá và tự tính unitPrice/total,
+      // kèm voucherCode (nếu đã áp) để server xác nhận lần cuối.
+      const orderData = unwrap(await createOrder(toOrderItems(cart), voucher?.code));
       if (!orderData) return;
 
       // Giỏ đã được chốt vào đơn → dọn giỏ NGAY LÚC NÀY, đỡ đợi payment.
@@ -233,7 +232,7 @@ export default function CheckoutPage() {
       if (paymentMethod === 'sepay') {
         // Thanh toán online SePay: tạo phiên QR rồi sang màn hình chờ,
         // đơn chỉ PAID khi webhook SePay xác nhận tiền đã vào tài khoản.
-        const sessionData = await createSePaySession(orderData.id);
+        const sessionData = unwrap(await createSePayPayment(orderData.id));
         if (!sessionData) return;
         localStorage.setItem(PENDING_ORDER_KEY, String(sessionData.orderId));
         // Nhả isSubmitting CÙNG lúc setSession (React batch 1 lần render) —
@@ -246,18 +245,12 @@ export default function CheckoutPage() {
 
       // Luồng momo/card (hoàn tất ngay) — giờ yêu cầu JWT và chỉ chủ đơn.
       const idempotencyKey = `IDEM-${Date.now()}-${orderData.id}`;
-      const payRes = await payOrder(orderData.id, paymentMethod, idempotencyKey);
-      if (!payRes.ok) {
-        if (payRes.kind === 'unauthenticated') {
-          clearSessionAndGoLogin();
-          return;
-        }
-        throw new Error(payRes.message);
-      }
+      const payData = unwrap(await payOrder(orderData.id, paymentMethod, idempotencyKey));
+      if (!payData) return;
 
       // Giữ isSubmitting=true cho tới khi trang thành công mount, tránh nháy
       // màn giỏ rỗng trong khoảng router đang chuyển trang.
-      router.push(`/order-success?orderId=${orderData.id}&transId=${payRes.data.transactionId}`);
+      router.push(`/order-success?orderId=${orderData.id}&transId=${payData.transactionId}`);
     } catch (err: unknown) {
       console.error('Payment error:', err);
       const msg = err instanceof Error ? err.message : 'Có lỗi xảy ra trong quá trình thanh toán.';
@@ -272,7 +265,7 @@ export default function CheckoutPage() {
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
-      const sessionData = await createSePaySession(session.orderId);
+      const sessionData = unwrap(await createSePayPayment(session.orderId));
       if (!sessionData) return;
       localStorage.setItem(PENDING_ORDER_KEY, String(sessionData.orderId));
       setSession(sessionData);
@@ -528,50 +521,23 @@ export default function CheckoutPage() {
               <div className="space-y-2">
                 <label className="text-xs font-bold uppercase text-gray-400 block">Phương thức thanh toán</label>
 
-                <div
-                  onClick={() => setPaymentMethod('sepay')}
-                  className={`p-4 rounded-2xl border cursor-pointer flex items-center justify-between transition ${paymentMethod === 'sepay' ? 'border-[#006A32] bg-[#006A32]/5' : 'border-gray-200'
-                    }`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-[#006A32] rounded-lg flex items-center justify-center text-white font-bold text-xs">₫</div>
-                    <div>
-                      <h5 className="font-bold text-xs">Chuyển khoản ngân hàng</h5>
-                      <p className="text-[10px] text-gray-400">SePay — quét QR, tự xác nhận trong 2 phút</p>
+                {PAYMENT_METHODS.map((m) => (
+                  <div
+                    key={m.id}
+                    onClick={() => setPaymentMethod(m.id)}
+                    className={`p-4 rounded-2xl border cursor-pointer flex items-center justify-between transition ${paymentMethod === m.id ? 'border-[#006A32] bg-[#006A32]/5' : 'border-gray-200'
+                      }`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div className={`w-8 h-8 ${m.iconBg} rounded-lg flex items-center justify-center text-white font-bold text-xs`}>{m.icon}</div>
+                      <div>
+                        <h5 className="font-bold text-xs">{m.title}</h5>
+                        <p className="text-[10px] text-gray-400">{m.hint}</p>
+                      </div>
                     </div>
+                    <input type="radio" checked={paymentMethod === m.id} readOnly className="text-[#006A32]" />
                   </div>
-                  <input type="radio" checked={paymentMethod === 'sepay'} readOnly className="text-[#006A32]" />
-                </div>
-
-                <div
-                  onClick={() => setPaymentMethod('momo')}
-                  className={`p-4 rounded-2xl border cursor-pointer flex items-center justify-between transition ${paymentMethod === 'momo' ? 'border-[#006A32] bg-[#006A32]/5' : 'border-gray-200'
-                    }`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-pink-600 rounded-lg flex items-center justify-center text-white font-bold text-xs">M</div>
-                    <div>
-                      <h5 className="font-bold text-xs">Ví điện tử</h5>
-                      <p className="text-[10px] text-gray-400">MoMo / ZaloPay</p>
-                    </div>
-                  </div>
-                  <input type="radio" checked={paymentMethod === 'momo'} readOnly className="text-[#006A32]" />
-                </div>
-
-                <div
-                  onClick={() => setPaymentMethod('card')}
-                  className={`p-4 rounded-2xl border cursor-pointer flex items-center justify-between transition ${paymentMethod === 'card' ? 'border-[#006A32] bg-[#006A32]/5' : 'border-gray-200'
-                    }`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xs">💳</div>
-                    <div>
-                      <h5 className="font-bold text-xs">Thẻ ngân hàng</h5>
-                      <p className="text-[10px] text-gray-400">Visa / Mastercard / Napas</p>
-                    </div>
-                  </div>
-                  <input type="radio" checked={paymentMethod === 'card'} readOnly className="text-[#006A32]" />
-                </div>
+                ))}
               </div>
 
               <div className="space-y-2 text-xs border-t pt-4">
