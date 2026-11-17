@@ -38,9 +38,6 @@ export default function Home() {
   /** Thêm vào giỏ (gộp món trùng) — đã có SiteHeader hiện số lượng nên ở lại menu. */
   const handleAddToCart = (newItem: CartItem) => {
     setCart((current) => addToCart(current, newItem));
-    // Thêm món mới = bắt đầu ý định mua mới → bỏ marker phiên SePay cũ
-    // (nếu còn) để checkout không kéo người dùng về phiên thanh toán đã bỏ.
-    localStorage.removeItem('phuclong_pending_order');
   };
 
   return (

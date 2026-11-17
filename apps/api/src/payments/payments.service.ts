@@ -1,37 +1,20 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { randomBytes } from 'crypto';
 import { LoyaltyTransactionType, Prisma, ProductSize } from '../generated/prisma/client';
 import { OrdersService } from '../orders/orders.service';
 import { Order, OrderStatus } from '../orders/entities/order.entity';
 import type { AuthUser } from '../common/auth/auth-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  PaymentRecord,
-  PaymentStatus,
-  SePaySession,
-  SePayWebhookPayload,
-} from './payments.data';
-
-/** Hạn chót của phiên thanh toán SePay (giây) — đề bài yêu cầu 2 phút. */
-const SEPAY_TIMEOUT_SECONDS = Number(process.env.SEPAY_TIMEOUT_SECONDS || 120);
+import { PaymentRecord, PaymentStatus } from './payments.data';
 
 /** Cứ mỗi 10.000đ được thanh toán thành công thì tặng 1 điểm loyalty. */
 const LOYALTY_EARN_UNIT = 10_000;
 
-/** result là Json của Prisma — luôn đưa về object để ghi đè an toàn. */
-function asRecord(result: unknown): Record<string, unknown> {
-  return typeof result === 'object' && result !== null
-    ? { ...result }
-    : {};
-}
-
 /** Nhận diện lỗi unique constraint của Prisma (trùng khóa idempotency). */
-function isUniqueViolation(error: unknown): boolean {
+export function isUniqueViolation(error: unknown): boolean {
   return (
     typeof error === 'object' &&
     error !== null &&
@@ -77,9 +60,7 @@ export class PaymentsService {
       // Trừ kho + đổi trạng thái đơn + ghi nhận thanh toán trong một transaction:
       // thiếu nguyên liệu/ly ở bất kỳ bước nào thì tất cả được rollback.
       const payment = await this.prisma.$transaction(async (tx) => {
-        await this.deductInventory(tx, order);
-        await this.ordersService.updateStatus(order.id, OrderStatus.PAID, tx);
-        await this.awardLoyaltyPoints(tx, order.userId, order.id, order.total);
+        await this.fulfillOrder(tx, order);
 
         return tx.payment.create({
           data: {
@@ -128,6 +109,20 @@ export class PaymentsService {
       );
     }
     return this.toPaymentRecord(existing);
+  }
+
+  /**
+   * Hoàn tất một đơn đã nhận tiền, dùng chung cho mọi cách thanh toán: trừ kho →
+   * đơn PAID → cộng điểm loyalty. Chạy trong transaction của người gọi, nên lỗi ở
+   * bất kỳ bước nào (hết ly/nguyên liệu, đơn đổi trạng thái …) rollback toàn bộ.
+   */
+  async fulfillOrder(
+    tx: Prisma.TransactionClient,
+    order: Order,
+  ): Promise<{ earnedPoints: number; totalPoints: number }> {
+    await this.deductInventory(tx, order);
+    await this.ordersService.updateStatus(order.id, OrderStatus.PAID, tx);
+    return this.awardLoyaltyPoints(tx, order.userId, order.id, order.total);
   }
 
   /**
@@ -209,9 +204,15 @@ export class PaymentsService {
     userId: string,
     orderId: number,
     total: number,
-  ): Promise<void> {
+  ): Promise<{ earnedPoints: number; totalPoints: number }> {
     const points = Math.floor(total / LOYALTY_EARN_UNIT);
-    if (points <= 0) return;
+    if (points <= 0) {
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { loyaltyPoints: true },
+      });
+      return { earnedPoints: 0, totalPoints: user?.loyaltyPoints ?? 0 };
+    }
 
     // increment nguyên tử và trả luôn số dư mới: không cần đọc trước (và
     // balanceAfter đúng cả khi hai đơn của cùng user thanh toán song song).
@@ -230,6 +231,7 @@ export class PaymentsService {
         description: `Tích điểm từ đơn #${orderId}`,
       },
     });
+    return { earnedPoints: points, totalPoints: loyaltyPoints };
   }
 
   /** GET /payments/loyalty — điểm thưởng hiện tại của user đang đăng nhập. */
@@ -243,210 +245,6 @@ export class PaymentsService {
     return { userId: found.id, loyaltyPoints: found.loyaltyPoints };
   }
 
-  /**
-   * Tạo phiên thanh toán SePay cho đơn: ghi nhận payment PENDING với mã
-   * chuyển khoản ngẫu nhiên và hạn chót (2 phút), trả về URL ảnh QR để quét.
-   */
-  async createSePayPayment(
-    orderId: string | number,
-    user?: AuthUser,
-  ): Promise<SePaySession> {
-    const acc = process.env.SEPAY_ACC;
-    const bank = process.env.SEPAY_BANK;
-    if (!acc || !bank) {
-      throw new BadRequestException(
-        'Chưa cấu hình tài khoản nhận tiền (SEPAY_ACC, SEPAY_BANK) cho SePay.',
-      );
-    }
-
-    const order = await this.ordersService.findOne(orderId, user);
-    if (order.status === OrderStatus.PAID) {
-      throw new BadRequestException('Đơn hàng này đã được thanh toán trước đó.');
-    }
-
-    // Mã chuyển khoản ngẫu nhiên: nội dung chuyển khoản chứa mã này để
-    // webhook khớp về đúng đơn, không dùng số tuần tự để tránh bị dò.
-    const paymentCode = `PL${randomBytes(5).toString('hex').toUpperCase()}`;
-    const expiresAt = new Date(Date.now() + SEPAY_TIMEOUT_SECONDS * 1000);
-
-    const qrBase = process.env.SEPAY_QR_BASE || 'https://vietqr.app/img';
-    const qrUrl =
-      `${qrBase}?acc=${encodeURIComponent(acc)}&bank=${encodeURIComponent(bank)}` +
-      `&amount=${order.total}&des=${paymentCode}`;
-
-    await this.prisma.payment.create({
-      data: {
-        userId: order.userId,
-        orderId: order.id,
-        method: 'sepay',
-        success: false,
-        requestFingerprint: `sepay:${order.id}:${paymentCode}`,
-        result: { status: 'PENDING', paymentCode, qrUrl },
-        amount: order.total,
-        status: 'PENDING',
-        paymentCode,
-        expiresAt,
-      },
-    });
-
-    return {
-      orderId: order.id,
-      paymentCode,
-      qrUrl,
-      amount: order.total,
-      expiresAt: expiresAt.toISOString(),
-    };
-  }
-
-  /**
-   * Webhook SePay gọi khi tài khoản nhận tiền có biến động (auth đã được
-   * SepayWebhookGuard kiểm tra bằng khóa API). Mọi nhánh nghiệp vụ đều trả
-   * bình thường (controller luôn phản hồi HTTP 200 {"success": true}); chỉ lỗi hạ tầng
-   * (DB, hết kho …) mới ném — transaction rollback, phiên vẫn PENDING và SePay sẽ retry.
-   */
-  async handleWebhook(payload: SePayWebhookPayload): Promise<void> {
-    // Chỉ quan tâm tiền VÀO tài khoản.
-    if (payload.transferType !== 'in') return;
-
-    const paymentCode = this.extractPaymentCode(payload);
-    if (!paymentCode) return; // chuyển khoản lạ, không thuộc đơn nào
-
-    const payment = await this.prisma.payment.findUnique({
-      where: { paymentCode },
-    });
-    if (!payment || payment.status !== 'PENDING') return; // không có hoặc đã xử lý (webhook trùng)
-
-    const expired = !!payment.expiresAt && payment.expiresAt.getTime() < Date.now();
-    const underpaid =
-      typeof payload.transferAmount === 'number' && payload.transferAmount < payment.amount;
-    if (expired || underpaid) {
-      await this.settle(payment, expired ? 'EXPIRED' : 'FAILED', {
-        sepayTransactionId: payload.id ?? null,
-        reason: expired
-          ? 'Hết thời hạn thanh toán 2 phút'
-          : 'Số tiền chuyển khoản nhỏ hơn số tiền cần thanh toán',
-      });
-      return;
-    }
-
-    // Đọc đơn TRƯỚC transaction để transaction (giữ khóa dòng payment) ngắn nhất có thể.
-    const order = await this.ordersService.findOne(payment.orderId);
-    if (order.status === OrderStatus.PAID) {
-      // Đơn đã được trả bằng luồng khác (momo/card) — không hoàn tất lại.
-      await this.settle(payment, 'FAILED', { reason: 'Đơn hàng đã được thanh toán' });
-      return;
-    }
-
-    // Claim + trừ kho + đổi trạng thái đơn trong một transaction: thiếu nguyên
-    // liệu/ly (hoặc đơn vừa được trả ở nơi khác) thì rollback cả claim.
-    await this.prisma.$transaction(async (tx) => {
-      // Chiếm quyền xử lý bằng update có điều kiện: nếu webhook trùng chạy
-      // song song thì chỉ một bên claim thành công (count > 0).
-      const claim = await tx.payment.updateMany({
-        where: { id: payment.id, status: 'PENDING' },
-        data: {
-          status: 'PAID',
-          success: true,
-          paidAt: new Date(),
-          result: {
-            ...asRecord(payment.result),
-            status: 'PAID',
-            transactionId: `TXN-SEPAY-${payload.id ?? Date.now()}`,
-            sepayReferenceCode: payload.referenceCode ?? null,
-          },
-        },
-      });
-      if (claim.count === 0) return; // đã có webhook khác xử lý
-
-      await this.deductInventory(tx, order);
-      await this.ordersService.updateStatus(order.id, OrderStatus.PAID, tx);
-      await this.awardLoyaltyPoints(tx, order.userId, order.id, order.total);
-    });
-  }
-
-  /** Chốt một phiên PENDING thành EXPIRED/FAILED, giữ nguyên các trường của result cũ. */
-  private settle(
-    payment: { id: number; result: unknown },
-    status: 'EXPIRED' | 'FAILED',
-    extra: Record<string, string | number | null> = {},
-  ) {
-    return this.prisma.payment.update({
-      where: { id: payment.id },
-      data: { status, result: { ...asRecord(payment.result), status, ...extra } },
-    });
-  }
-
-  /** Khớp mã thanh toán từ trường `code` hoặc nội dung chuyển khoản. */
-  private extractPaymentCode(payload: SePayWebhookPayload): string | null {
-    const raw = `${payload.code ?? ''} ${payload.content ?? ''}`.toUpperCase();
-    const match = raw.match(/PL[0-9A-F]{10}/);
-    return match ? match[0] : null;
-  }
-
-  /**
-   * Chỉ dành cho demo local: giả lập một giao dịch chuyển khoản thành công
-   * cho phiên PENDING mới nhất của đơn (SePay không gọi được localhost).
-   * Đi trọn vẹn qua handleWebhook nên hết hạn/thiếu tiền vẫn bị chặn như thật.
-   */
-  async simulateSePayPayment(
-    orderId: string | number,
-    user?: AuthUser,
-  ): Promise<{ success: true }> {
-    if (process.env.NODE_ENV === 'production') {
-      throw new ForbiddenException(
-        'Chức năng mô phỏng chỉ dùng cho môi trường demo local.',
-      );
-    }
-
-    const order = await this.ordersService.findOne(orderId, user);
-    const payment = await this.prisma.payment.findFirst({
-      where: { orderId: order.id, method: 'sepay', status: 'PENDING' },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!payment || !payment.paymentCode) {
-      throw new BadRequestException(
-        'Đơn hàng không có phiên thanh toán SePay nào đang chờ.',
-      );
-    }
-
-    await this.handleWebhook({
-      id: Date.now(),
-      code: payment.paymentCode,
-      transferType: 'in',
-      transferAmount: payment.amount,
-      referenceCode: `SIM-${Date.now()}`,
-    });
-    return { success: true };
-  }
-
-  async getByOrderId(
-    orderId: string | number,
-    user?: AuthUser,
-  ): Promise<PaymentRecord | undefined> {
-    const payment = await this.prisma.payment.findFirst({
-      where: { orderId: Number(orderId) },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!payment) {
-      return undefined;
-    }
-    if (user && user.role !== 'ADMIN' && payment.userId !== user.id) {
-      throw new ForbiddenException('Chỉ được xem thanh toán của đơn hàng của mình');
-    }
-
-    // Hết hạn "lười": phiên SePay quá hạn chưa trả → chuyển EXPIRED khi được hỏi.
-    if (
-      payment.status === 'PENDING' &&
-      payment.expiresAt &&
-      payment.expiresAt.getTime() < Date.now()
-    ) {
-      await this.settle(payment, 'EXPIRED');
-      payment.status = 'EXPIRED';
-    }
-
-    return this.toPaymentRecord(payment);
-  }
-
   private toPaymentRecord(payment: {
     id: number;
     orderId: number;
@@ -456,13 +254,8 @@ export class PaymentsService {
     result: unknown;
     idempotencyKey: string | null;
     createdAt: Date;
-    expiresAt?: Date | null;
-    paymentCode?: string | null;
   }): PaymentRecord {
-    const result = (payment.result ?? {}) as {
-      transactionId?: string;
-      qrUrl?: string;
-    };
+    const result = (payment.result ?? {}) as { transactionId?: string };
     return {
       id: payment.id,
       orderId: payment.orderId,
@@ -472,9 +265,6 @@ export class PaymentsService {
       transactionId: result.transactionId ?? `TXN-${payment.id}`,
       idempotencyKey: payment.idempotencyKey ?? undefined,
       createdAt: payment.createdAt.toISOString(),
-      expiresAt: payment.expiresAt?.toISOString() ?? undefined,
-      paymentCode: payment.paymentCode ?? undefined,
-      qrUrl: typeof result.qrUrl === 'string' ? result.qrUrl : undefined,
     };
   }
 }

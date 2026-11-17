@@ -4,25 +4,28 @@ import {
   Get,
   Body,
   Headers,
-  Param,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { PaymentsService } from './payments.service';
+import { SepayService } from './sepay.service';
+import { CreateSePayCheckoutDto } from './dto/create-sepay-checkout.dto';
 import { JwtAuthGuard } from '../common/auth/jwt-auth.guard';
 import type { AuthUser } from '../common/auth/auth-user.interface';
 
-// Webhook SePay đã tách sang sepay-webhook.controller.ts: nó xác thực bằng
-// khóa API (SepayWebhookGuard) chứ không phải JWT như các route bên dưới.
+// Webhook SePay nằm ở sepay-webhook.controller.ts: nó xác thực bằng khóa API
+// (SepayWebhookGuard) chứ không phải JWT như các route bên dưới.
 @Controller('payments')
+@UseGuards(JwtAuthGuard)
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly sepayService: SepayService,
+  ) {}
 
-  // Luồng momo/card (hoàn tất ngay) — cần đăng nhập và chỉ chủ đơn (hoặc ADMIN)
-  // được thanh toán: không còn ai đánh dấu đơn của người khác PAID được.
+  // Luồng momo/card (hoàn tất ngay) — chỉ chủ đơn (hoặc ADMIN) được thanh toán.
   @Post()
-  @UseGuards(JwtAuthGuard)
   async pay(
     @Req() request: Request & { user: AuthUser },
     @Body('orderId') orderId: string,
@@ -34,42 +37,29 @@ export class PaymentsController {
     return this.paymentsService.processPayment(orderId, method, key, request.user);
   }
 
-  // Tạo phiên thanh toán SePay (QR chuyển khoản) — cần đăng nhập, chỉ chủ đơn.
-  @Post('sepay')
-  @UseGuards(JwtAuthGuard)
-  createSePay(
+  // Mở (hoặc lấy lại) phiên SePay của đơn: QR + hạn chót. Gọi lại khi phiên còn hạn
+  // thì trả đúng phiên cũ; hết hạn → status EXPIRED, `restart: true` để mở phiên mới.
+  @Post('sepay/checkout')
+  createSePayCheckout(
     @Req() request: Request & { user: AuthUser },
-    @Body('orderId') orderId: string,
+    @Body() dto: CreateSePayCheckoutDto,
   ) {
-    return this.paymentsService.createSePayPayment(orderId, request.user);
+    return this.sepayService.createCheckout(request.user.id, dto.orderId, dto.restart ?? false);
   }
 
   // Mô phỏng chuyển khoản — chỉ cho demo local (SePay không gọi được localhost),
   // backend tự chặn khi NODE_ENV=production.
   @Post('sepay/simulate')
-  @UseGuards(JwtAuthGuard)
   simulateSePay(
     @Req() request: Request & { user: AuthUser },
-    @Body('orderId') orderId: string,
+    @Body('orderId') orderId: number,
   ) {
-    return this.paymentsService.simulateSePayPayment(orderId, request.user);
+    return this.sepayService.simulate(Number(orderId), request.user);
   }
 
-  // Điểm thưởng tích lũy của user đang đăng nhập — khai báo trước @Get(':orderId')
-  // để không bị nuốt vào route param.
+  // Điểm thưởng tích lũy của user đang đăng nhập.
   @Get('loyalty')
-  @UseGuards(JwtAuthGuard)
   async getLoyaltyPoints(@Req() request: Request & { user: AuthUser }) {
     return this.paymentsService.getLoyaltyPoints(request.user);
-  }
-
-  // Tra trạng thái thanh toán — frontend poll mỗi vài giây trong phiên SePay.
-  @Get(':orderId')
-  @UseGuards(JwtAuthGuard)
-  async getByOrder(
-    @Req() request: Request & { user: AuthUser },
-    @Param('orderId') orderId: string,
-  ) {
-    return this.paymentsService.getByOrderId(orderId, request.user);
   }
 }

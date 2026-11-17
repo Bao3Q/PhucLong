@@ -56,7 +56,7 @@ Secret **chỉ** nằm trong dashboard của nền tảng hoặc GitHub Secrets 
 | `JWT_SECRET` | chuỗi ngẫu nhiên dài |
 | `CORS_ORIGIN` | `https://phuc-long-omega.vercel.app` (nhiều domain thì cách nhau dấu phẩy, không có `/` cuối) |
 | `NODE_ENV` | `production` |
-| `SEPAY_ACC`, `SEPAY_BANK`, `SEPAY_API_KEY` | cấu hình SePay |
+| `SEPAY_BANK_CODE`, `SEPAY_ACCOUNT_NUMBER`, `SEPAY_ACCOUNT_NAME`, `SEPAY_API_KEY` | cấu hình SePay |
 
 **Vercel (web) → Settings → Environment Variables**
 

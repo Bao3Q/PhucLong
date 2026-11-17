@@ -1,12 +1,20 @@
 /**
  * Integration test (Task 5.2) – luồng tạo đơn → thanh toán qua HTTP thật trên
  * toàn bộ AppModule + PostgreSQL thật (transaction, trừ kho, idempotency).
- * Mã test khớp docs/traceability-matrix.md (INT-T01 … INT-T07).
+ * Mã test khớp docs/traceability-matrix.md (INT-T01 … INT-T08).
  */
 import { INestApplication } from '@nestjs/common';
+import { PrismaService } from '../../apps/api/src/prisma/prisma.service';
 import { ONE_CAPPUCCINO, PASSWORD, bearer, createApp, loginAdmin, registerAndLogin, request, uniqueEmail } from './helpers';
 
 type Cup = { size: string; quantity: number };
+
+const SEPAY_ENV = {
+  SEPAY_BANK_CODE: 'MB',
+  SEPAY_ACCOUNT_NUMBER: '1234567890',
+  SEPAY_ACCOUNT_NAME: 'PHUC LONG TEST',
+  SEPAY_API_KEY: 'it-sepay-key',
+};
 
 describe('API tạo đơn và thanh toán (integration, PostgreSQL thật)', () => {
   let app: INestApplication;
@@ -16,6 +24,7 @@ describe('API tạo đơn và thanh toán (integration, PostgreSQL thật)', () 
   let tokenAdmin: string;
 
   beforeAll(async () => {
+    Object.assign(process.env, SEPAY_ENV);
     app = await createApp();
     http = app.getHttpServer();
     tokenA = await registerAndLogin(app, 'khach-a');
@@ -24,6 +33,7 @@ describe('API tạo đơn và thanh toán (integration, PostgreSQL thật)', () 
   });
 
   afterAll(async () => {
+    for (const key of Object.keys(SEPAY_ENV)) delete process.env[key];
     await app?.close();
   });
 
@@ -132,5 +142,84 @@ describe('API tạo đơn và thanh toán (integration, PostgreSQL thật)', () 
     expect(mineA.body.map((o: { id: number }) => o.id)).toContain(order.id);
     const mineB = await request(http).get('/orders/me').set(bearer(tokenB)).expect(200);
     expect(mineB.body.map((o: { id: number }) => o.id)).not.toContain(order.id);
+  });
+
+  /** SePay: mở phiên, gửi webhook như SePay (khóa API + payload giao dịch tiền vào). */
+  function sepay(token: string, orderId: number) {
+    const checkout = (restart?: boolean) =>
+      request(http).post('/payments/sepay/checkout').set(bearer(token)).send({ orderId, restart });
+    const webhook = (body: Record<string, unknown>) =>
+      request(http)
+        .post('/payments/sepay/webhook')
+        .set('Authorization', `Apikey ${SEPAY_ENV.SEPAY_API_KEY}`)
+        .send({
+          id: Date.now(),
+          accountNumber: SEPAY_ENV.SEPAY_ACCOUNT_NUMBER,
+          transferType: 'in',
+          content: `PHUCLONG-${orderId}`,
+          ...body,
+        });
+    return { checkout, webhook };
+  }
+  const orderStatus = async (token: string, id: number) =>
+    (await request(http).get(`/orders/${id}`).set(bearer(token)).expect(200)).body.status;
+
+  it('INT-T08 SePay: checkout → webhook đối soát nghiêm ngặt → PAID, trừ ly một lần, webhook trùng an toàn', async () => {
+    const order = await createOrder(tokenA);
+    const before = await cupsS();
+    const { checkout, webhook } = sepay(tokenA, order.id);
+    const txId = Date.now();
+
+    // Người khác không mở được phiên của đơn này
+    await sepay(tokenB, order.id).checkout().expect(404);
+
+    const opened = await checkout().expect(201);
+    expect(opened.body).toMatchObject({
+      orderId: order.id,
+      amount: order.total,
+      status: 'PENDING',
+      transferDescription: `PHUCLONG-${order.id}`,
+    });
+    // Gọi lại khi còn hạn → đúng phiên cũ (F5 trang QR không đổi mã)
+    expect((await checkout().expect(201)).body.expiresAt).toBe(opened.body.expiresAt);
+
+    // Không khóa API → 401; sai số tiền (thiếu/dư), sai tài khoản, sai nội dung → 400, đơn giữ nguyên
+    await request(http).post('/payments/sepay/webhook').send({ id: txId }).expect(401);
+    await webhook({ id: txId, transferAmount: order.total - 1 }).expect(400);
+    await webhook({ id: txId, transferAmount: order.total + 1 }).expect(400);
+    await webhook({ id: txId, transferAmount: order.total, accountNumber: '999' }).expect(400);
+    await webhook({ id: txId, transferAmount: order.total, content: 'ck tien' }).expect(400);
+    expect(await orderStatus(tokenA, order.id)).toBe('PENDING');
+
+    await webhook({ id: txId, transferAmount: order.total }).expect(200, { success: true });
+    expect(await orderStatus(tokenA, order.id)).toBe('PAID');
+    expect(await cupsS()).toBe(before - 1);
+
+    // Webhook trùng → 200 và không trừ kho lần hai; giao dịch khác cho đơn đã trả → 409
+    await webhook({ id: txId, transferAmount: order.total }).expect(200);
+    expect(await cupsS()).toBe(before - 1);
+    await webhook({ id: txId + 1, transferAmount: order.total }).expect(409);
+    await checkout().expect(409);
+  });
+
+  it('INT-T08b SePay: phiên hết hạn → webhook 409, checkout báo EXPIRED (đơn PAYMENT_FAILED), thanh toán lại → PAID', async () => {
+    const order = await createOrder(tokenA);
+    const { checkout, webhook } = sepay(tokenA, order.id);
+    await checkout().expect(201);
+
+    // Ép phiên hết hạn (thay vì chờ 2 phút)
+    await app
+      .get(PrismaService)
+      .payment.updateMany({ where: { orderId: order.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+
+    await webhook({ transferAmount: order.total }).expect(409);
+    expect(await orderStatus(tokenA, order.id)).toBe('PENDING');
+
+    expect((await checkout().expect(201)).body.status).toBe('EXPIRED');
+    expect(await orderStatus(tokenA, order.id)).toBe('PAYMENT_FAILED');
+
+    expect((await checkout(true).expect(201)).body.status).toBe('PENDING');
+    await webhook({ transferAmount: order.total }).expect(200);
+    expect(await orderStatus(tokenA, order.id)).toBe('PAID');
   });
 });

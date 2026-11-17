@@ -1,28 +1,18 @@
 export type PaymentStatus = 'PENDING' | 'PAID' | 'EXPIRED' | 'FAILED';
 
-/** Phiên thanh toán SePay trả về cho frontend (QR chuyển khoản). */
-export interface SePaySession {
+/** Phiên thanh toán SePay (QR chuyển khoản) trả về cho frontend. */
+export interface SePayCheckout {
   orderId: number;
-  paymentCode: string;
-  qrUrl: string;
   amount: number;
+  /** Nội dung chuyển khoản bắt buộc — webhook dựa vào đây để khớp đơn. */
+  transferDescription: string;
+  bankCode: string;
+  accountNumber: string;
+  accountName: string;
+  qrUrl: string;
+  status: 'PENDING' | 'EXPIRED';
+  /** Hạn chót của mã QR (ISO 8601) — frontend dùng để đếm ngược. */
   expiresAt: string;
-}
-
-/** Payload JSON SePay POST lên webhook khi có giao dịch vào tài khoản. */
-export interface SePayWebhookPayload {
-  id?: number | string;
-  gateway?: string;
-  transactionDate?: string;
-  accountNumber?: string;
-  subAccount?: string | null;
-  code?: string | null;
-  content?: string;
-  transferType?: string;
-  description?: string;
-  transferAmount?: number;
-  accumulated?: number;
-  referenceCode?: string;
 }
 
 export interface PaymentRecord {
@@ -34,9 +24,4 @@ export interface PaymentRecord {
   transactionId: string;
   idempotencyKey?: string;
   createdAt: string;
-  /** Hạn chót của phiên SePay — frontend dùng để đếm ngược. */
-  expiresAt?: string;
-  paymentCode?: string;
-  /** URL ảnh QR (lưu trong result để frontend khôi phục đúng phiên cũ). */
-  qrUrl?: string;
 }

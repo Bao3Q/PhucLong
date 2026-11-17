@@ -79,16 +79,22 @@ export interface CreateOrderItem {
   note?: string;
 }
 
-/** Khớp SePaySession trả về từ POST /payments/sepay. */
-export interface SePaySession {
+/** Khớp SePayCheckout trả về từ POST /payments/sepay/checkout. */
+export interface SePayCheckout {
   orderId: number;
-  paymentCode: string;
-  qrUrl: string;
   amount: number;
+  /** Nội dung chuyển khoản bắt buộc (PHUCLONG-<mã đơn>) — webhook khớp đơn theo đây. */
+  transferDescription: string;
+  bankCode: string;
+  accountNumber: string;
+  accountName: string;
+  qrUrl: string;
+  status: 'PENDING' | 'EXPIRED';
+  /** Hạn chót của mã QR (ISO 8601) — dùng để đếm ngược. */
   expiresAt: string;
 }
 
-/** Khớp PaymentRecord trả về từ GET /payments/:orderId và POST /payments. */
+/** Khớp PaymentRecord trả về từ POST /payments (momo/card). */
 export interface PaymentRecord {
   id: number;
   orderId: number;
@@ -98,9 +104,6 @@ export interface PaymentRecord {
   transactionId: string;
   idempotencyKey?: string;
   createdAt: string;
-  expiresAt?: string;
-  paymentCode?: string;
-  qrUrl?: string;
 }
 
 export interface LoyaltyPoints {
@@ -277,14 +280,15 @@ export function payOrder(
   });
 }
 
-/** POST /payments/sepay — tạo phiên QR chuyển khoản. */
-export function createSePayPayment(orderId: number | string): Promise<ApiResult<SePaySession>> {
-  return request<SePaySession>('/payments/sepay', jsonBody({ orderId }));
-}
-
-/** GET /payments/:orderId — tra trạng thái phiên thanh toán (frontend poll). */
-export function fetchPayment(orderId: number | string): Promise<ApiResult<PaymentRecord>> {
-  return request<PaymentRecord>(`/payments/${encodeURIComponent(String(orderId))}`);
+/**
+ * POST /payments/sepay/checkout — mở hoặc lấy lại phiên QR chuyển khoản của đơn.
+ * Phiên còn hạn → trả đúng phiên cũ; hết hạn → status EXPIRED, `restart` để mở phiên mới.
+ */
+export function createSePayCheckout(
+  orderId: number,
+  restart = false,
+): Promise<ApiResult<SePayCheckout>> {
+  return request<SePayCheckout>('/payments/sepay/checkout', jsonBody({ orderId, restart }));
 }
 
 /** POST /payments/sepay/simulate — mô phỏng chuyển khoản, chỉ cho demo local. */

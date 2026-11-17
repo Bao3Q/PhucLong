@@ -1,7 +1,7 @@
 import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
-import { PaymentsService } from './payments.service';
+import { SepayService } from './sepay.service';
 import { SepayWebhookGuard } from './sepay-webhook.guard';
-import type { SePayWebhookPayload } from './payments.data';
+
 
 /**
  * Webhook nằm ngoài PaymentsController (nơi mọi route đều cần JWT người dùng):
@@ -9,15 +9,15 @@ import type { SePayWebhookPayload } from './payments.data';
  */
 @Controller('payments/sepay')
 export class SepayWebhookController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(private readonly sepayService: SepayService) {}
 
-  // SePay gọi khi tài khoản nhận tiền có giao dịch. Phải trả HTTP 200 với
-  // body đúng {"success": true}; sai khóa API trả 401 để SePay tự retry.
+  // SePay cần HTTP 200 với body {"success": true} để coi là gửi thành công; sai khóa
+  // API → 401, không khớp đơn/số tiền/hết hạn → 4xx (SePay hiện lỗi và retry).
   @Post('webhook')
   @HttpCode(200)
   @UseGuards(SepayWebhookGuard)
-  async handleWebhook(@Body() payload: SePayWebhookPayload) {
-    await this.paymentsService.handleWebhook(payload);
+  async handleWebhook(@Body() payload: unknown) {
+    await this.sepayService.handleWebhook(payload);
     return { success: true };
   }
 }

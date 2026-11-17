@@ -88,10 +88,12 @@ cd apps/api && npx prisma migrate deploy
 
 ### 2.4 Thanh toán online SePay (chuyển khoản QR)
 
-Cấu hình trong `.env` (xem `.env.example`): `SEPAY_ACC`, `SEPAY_BANK`, `SEPAY_API_KEY`, `SEPAY_QR_BASE`, `SEPAY_TIMEOUT_SECONDS` (mặc định **120 giây = 2 phút**).
+Cấu hình trong `.env` (xem `.env.example`): `SEPAY_BANK_CODE`, `SEPAY_ACCOUNT_NUMBER`, `SEPAY_ACCOUNT_NAME`, `SEPAY_API_KEY`, `SEPAY_TIMEOUT_SECONDS` (mặc định **120 giây = 2 phút**). Thiếu một trong bốn biến đầu thì tạo phiên/nhận webhook trả 503.
 
 - Trên [my.sepay.vn](https://my.sepay.vn): link tài khoản ngân hàng nhận tiền và tạo webhook trỏ tới `<API_URL>/payments/sepay/webhook`.
-- Luồng: tạo phiên → quét QR chuyển khoản kèm mã `PL…` → SePay gọi webhook khi tiền vào → API tự đối soát mã + số tiền, trừ kho và đánh dấu đơn `PAID`. Quá 2 phút chưa nhận tiền, phiên chuyển `EXPIRED`.
+- Luồng: đặt đơn → `POST /payments/sepay/checkout` mở phiên (mỗi đơn đúng một phiên, gọi lại khi còn hạn thì trả lại đúng phiên đó) → web chuyển tới `/payments/sepay/<mã đơn>` hiện QR với nội dung chuyển khoản **`PHUCLONG-<mã đơn>`** → khách chuyển khoản → SePay gọi webhook `POST /payments/sepay/webhook` (header `Authorization: Apikey <SEPAY_API_KEY>`) → trang tự cập nhật khi đơn sang `PAID`.
+- Webhook đối soát **nghiêm ngặt**: phải là tiền **vào**, đúng **số tài khoản**, nội dung chứa `PHUCLONG<mã đơn>`, đơn đã có phiên SePay, **số tiền khớp đúng** (thiếu hay dư đều bị từ chối), phiên **còn hạn**, đơn còn chờ thanh toán. Không khớp → 4xx (SePay hiện lỗi và tự gửi lại), đơn giữ nguyên; khớp → trừ kho, đơn `PAID`, cộng điểm trong một transaction. Webhook trùng cùng mã giao dịch vẫn trả 200.
+- Quá hạn (2 phút) chưa nhận tiền: gọi lại checkout thì trả `EXPIRED` và đơn chuyển `PAYMENT_FAILED`; khách bấm "Thanh toán lại" (`restart: true`) để nhận phiên mới trên cùng đơn. Đơn `PENDING`/`PAYMENT_FAILED` quá `ORDER_PENDING_TTL_MINUTES` mà không có phiên còn hạn sẽ tự hủy và hoàn kho.
 
 ### 2.5 Xác nhận & lịch sử đơn (Task 9)
 
@@ -268,7 +270,7 @@ Một hạng mục chỉ được coi là xong khi:
 
 ## 10. Danh mục API endpoint
 
-Toàn bộ **19 endpoint** của API (NestJS, `apps/api`). API không có prefix chung — route chạy ở root `/`.
+Toàn bộ **18 endpoint** của API (NestJS, `apps/api`). API không có prefix chung — route chạy ở root `/`.
 
 Quy ước cột **Xác thực**:
 - **Công khai** — không cần token.
@@ -307,10 +309,9 @@ Quy ước cột **Xác thực**:
 | Method | Đường dẫn | Xác thực | Mô tả |
 | --- | --- | --- | --- |
 | POST | `/payments` | JWT (chủ đơn hoặc ADMIN) | Thanh toán momo/card hoàn tất ngay; idempotency qua header `Idempotency-Key` |
-| POST | `/payments/sepay` | JWT (chủ đơn) | Tạo phiên thanh toán SePay (QR chuyển khoản, hạn 2 phút) |
+| POST | `/payments/sepay/checkout` | JWT (chủ đơn) | Mở hoặc lấy lại phiên SePay của đơn (QR chuyển khoản, hạn 2 phút); hết hạn → `EXPIRED`, `restart: true` để mở phiên mới; đơn không còn chờ thanh toán → 409 |
 | POST | `/payments/sepay/simulate` | JWT (chủ đơn) | Giả lập "tiền đã vào" cho demo local; tự chặn khi `NODE_ENV=production` |
 | GET | `/payments/loyalty` | JWT | Điểm tích lũy của user đang đăng nhập |
-| GET | `/payments/:orderId` | JWT (chủ đơn hoặc ADMIN) | Trạng thái phiên thanh toán theo đơn (frontend poll mỗi 3 giây) |
 | POST | `/payments/sepay/webhook` | Webhook (khóa API SePay) | Webhook SePay báo tiền vào: đối soát mã + số tiền → đơn `PAID`, trừ kho trong transaction |
 
 ### Khuyến mãi & tồn kho
