@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
+import { Prisma } from '../generated/prisma/client';
 import type { OrdersService } from '../orders/orders.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import { Order, OrderStatus } from '../orders/entities/order.entity';
@@ -39,6 +40,14 @@ const orderWithItems: Order = {
   ],
 };
 
+/** Dòng công thức của Cappuccino size M (productId '3') như Prisma trả về. */
+const recipe = (ingredientId: number, amount: number) => ({
+  productId: '3',
+  size: 'M',
+  ingredientId,
+  amount: new Prisma.Decimal(amount),
+});
+
 const storedPayment = {
   id: 1,
   orderId: 1,
@@ -62,12 +71,9 @@ describe('PaymentsService', () => {
   const tx = {
     cup: { updateMany: jest.fn() },
     recipeItem: { findMany: jest.fn() },
-    ingredient: { updateMany: jest.fn() },
+    ingredient: { updateMany: jest.fn(), findUnique: jest.fn() },
     payment: { create: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
-    user: {
-      findUnique: jest.fn().mockResolvedValue({ id: 'test-user-id', loyaltyPoints: 0 }),
-      update: jest.fn().mockResolvedValue({}),
-    },
+    user: { update: jest.fn() },
     loyaltyTransaction: { create: jest.fn().mockResolvedValue({}) },
   };
   const prisma = {
@@ -94,6 +100,7 @@ describe('PaymentsService', () => {
     tx.cup.updateMany.mockResolvedValue({ count: 1 });
     tx.recipeItem.findMany.mockResolvedValue([]);
     tx.ingredient.updateMany.mockResolvedValue({ count: 1 });
+    tx.user.update.mockResolvedValue({ loyaltyPoints: 10 }); // số dư SAU khi cộng
     tx.payment.create.mockResolvedValue(storedPayment);
     service = new PaymentsService(
       orders as unknown as OrdersService,
@@ -111,6 +118,7 @@ describe('PaymentsService', () => {
     expect(tx.user.update).toHaveBeenCalledWith({
       where: { id: 'test-user-id' },
       data: { loyaltyPoints: { increment: 10 } },
+      select: { loyaltyPoints: true },
     });
     expect(tx.loyaltyTransaction.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -125,25 +133,23 @@ describe('PaymentsService', () => {
 
   it('trừ ly và nguyên liệu trong cùng transaction', async () => {
     orders.findOne.mockResolvedValue(orderWithItems);
-    tx.recipeItem.findMany.mockResolvedValue([
-      { ingredientId: 1, amount: { mul: (n: number) => 18 * n }, ingredient: { name: 'Cà phê' } },
-      { ingredientId: 2, amount: { mul: (n: number) => 80 * n }, ingredient: { name: 'Sữa' } },
-      { ingredientId: 3, amount: { mul: (n: number) => 15 * n }, ingredient: { name: 'Đường' } },
-    ]);
+    tx.recipeItem.findMany.mockResolvedValue([recipe(1, 18), recipe(2, 80), recipe(3, 15)]);
 
     await service.processPayment(1, 'momo', 'idem-1');
 
+    // Một truy vấn công thức duy nhất cho cả đơn
+    expect(tx.recipeItem.findMany).toHaveBeenCalledTimes(1);
     expect(tx.cup.updateMany).toHaveBeenCalledWith({
       where: { size: 'M', quantity: { gte: 2 } },
       data: { quantity: { decrement: 2 } },
     });
     expect(tx.ingredient.updateMany).toHaveBeenCalledWith({
-      where: { id: 1, quantity: { gte: 36 } },
-      data: { quantity: { decrement: 36 } },
+      where: { id: 1, quantity: { gte: new Prisma.Decimal(36) } },
+      data: { quantity: { decrement: new Prisma.Decimal(36) } },
     });
     expect(tx.ingredient.updateMany).toHaveBeenCalledWith({
-      where: { id: 2, quantity: { gte: 160 } },
-      data: { quantity: { decrement: 160 } },
+      where: { id: 2, quantity: { gte: new Prisma.Decimal(160) } },
+      data: { quantity: { decrement: new Prisma.Decimal(160) } },
     });
     expect(orders.updateStatus).toHaveBeenCalledWith(1, OrderStatus.PAID, tx);
   });
@@ -157,14 +163,33 @@ describe('PaymentsService', () => {
     expect(tx.payment.create).not.toHaveBeenCalled();
   });
 
+  it('các dòng cùng món/size trong đơn gộp thành một lần trừ mỗi nguyên liệu', async () => {
+    const [item] = orderWithItems.items;
+    orders.findOne.mockResolvedValue({
+      ...orderWithItems,
+      items: [item, { ...item, id: 2, qty: 3 }],
+    });
+    tx.recipeItem.findMany.mockResolvedValue([recipe(2, 80)]);
+
+    await service.processPayment(1, 'momo');
+
+    expect(tx.cup.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.cup.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { size: 'M', quantity: { gte: 5 } } }),
+    );
+    expect(tx.ingredient.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.ingredient.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 2, quantity: { gte: new Prisma.Decimal(400) } } }),
+    );
+  });
+
   it('hết nguyên liệu → chặn thanh toán', async () => {
     orders.findOne.mockResolvedValue(orderWithItems);
-    tx.recipeItem.findMany.mockResolvedValue([
-      { ingredientId: 2, amount: { mul: (n: number) => 80 * n }, ingredient: { name: 'Sữa' } },
-    ]);
+    tx.recipeItem.findMany.mockResolvedValue([recipe(2, 80)]);
     tx.ingredient.updateMany.mockResolvedValue({ count: 0 });
+    tx.ingredient.findUnique.mockResolvedValue({ name: 'Sữa' });
 
-    await expect(service.processPayment(1, 'card')).rejects.toThrow(BadRequestException);
+    await expect(service.processPayment(1, 'card')).rejects.toThrow(/Sữa/);
     expect(orders.updateStatus).not.toHaveBeenCalled();
     expect(tx.payment.create).not.toHaveBeenCalled();
   });
@@ -275,7 +300,7 @@ describe('PaymentsService', () => {
       tx.payment.updateMany.mockResolvedValue({ count: 1 }); // claim thành công
       orders.findOne.mockResolvedValue(orderWithItems);
 
-      const res = await service.handleWebhook({
+      await service.handleWebhook({
         id: 92704,
         code: 'PLABCDEF1234',
         transferType: 'in',
@@ -283,7 +308,6 @@ describe('PaymentsService', () => {
         referenceCode: 'FT24012345678',
       });
 
-      expect(res).toEqual({ success: true });
       expect(tx.payment.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 10, status: 'PENDING' } }),
       );
@@ -292,13 +316,12 @@ describe('PaymentsService', () => {
     });
 
     it('webhook chuyển khoản lạ (không khớp mã) → bỏ qua an toàn', async () => {
-      const res = await service.handleWebhook({
+      await service.handleWebhook({
         id: 1,
         content: 'chuyen khoan la',
         transferType: 'in',
         transferAmount: 100000,
       });
-      expect(res).toEqual({ success: true });
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
@@ -309,14 +332,13 @@ describe('PaymentsService', () => {
       });
       prisma.payment.update.mockResolvedValue(sepayPayment);
 
-      const res = await service.handleWebhook({
+      await service.handleWebhook({
         id: 92705,
         code: 'PLABCDEF1234',
         transferType: 'in',
         transferAmount: 100000,
       });
 
-      expect(res).toEqual({ success: true });
       expect(prisma.payment.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 10 },
@@ -336,6 +358,27 @@ describe('PaymentsService', () => {
         code: 'PLABCDEF1234',
         transferType: 'in',
         transferAmount: 50000,
+      });
+
+      expect(prisma.payment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 10 },
+          data: expect.objectContaining({ status: 'FAILED' }),
+        }),
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('webhook đến khi đơn đã PAID bằng luồng khác → phiên FAILED, không trừ kho lần hai', async () => {
+      prisma.payment.findUnique.mockResolvedValue(sepayPayment);
+      prisma.payment.update.mockResolvedValue(sepayPayment);
+      orders.findOne.mockResolvedValue({ ...orderWithItems, status: OrderStatus.PAID });
+
+      await service.handleWebhook({
+        id: 92707,
+        code: 'PLABCDEF1234',
+        transferType: 'in',
+        transferAmount: 100000,
       });
 
       expect(prisma.payment.update).toHaveBeenCalledWith(
