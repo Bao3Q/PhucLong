@@ -8,4 +8,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping Render Health Endpoint
-        run: curl -f https://ten-app-cua-ban.onrender.com/health || exit 1
+        run: curl -f https://phuclong-kf14.onrender.com/ || exit 1
