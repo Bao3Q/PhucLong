@@ -91,5 +91,5 @@ Các chức năng bắt buộc để luồng end-to-end chạy được (mức *
 | Mock payment khác xa cổng thật | Luồng thật (3DS, callback) không được kiểm chứng | Giữ interface `PaymentsService` dễ thay bằng adapter cổng thật sau này; ghi rõ trong tài liệu |
 | Ảnh menu dùng URL ngoài có thể chết | Menu hiển thị thiếu ảnh | Dùng nguồn ổn định (Unsplash CDN); nếu cần, chuyển sang lưu ảnh nội bộ |
 | Scope creep (loyalty, promotion, ship) | Trễ deadline các task bắt buộc | Khoá phạm vi theo mục 3–5; phần mở rộng chỉ làm khi 5 task đã xong |
-| `PATCH /orders/:id/status` cho phép cả chủ đơn đổi trạng thái | Khách có thể tự chuyển đơn của mình sang `PAID` mà không thanh toán | Giới hạn API đổi trạng thái chỉ cho ADMIN (khách chỉ được huỷ đơn `PENDING`); bổ sung test phân quyền |
+| `PATCH /orders/:id/status` cho phép cả chủ đơn đổi trạng thái | Khách có thể tự chuyển đơn của mình sang `PAID` mà không thanh toán | **Đã xử lý:** route dùng `JwtAuthGuard` + `RolesGuard` với `@Roles('ADMIN')`, service chặn thêm tài khoản không phải ADMIN; test phân quyền trong `products.rbac.spec.ts` (CUSTOMER kể cả chủ đơn → 403) |
 | Chưa có màn hình cho nhân viên quầy | Nhân viên phải gọi API để đổi trạng thái đơn | Ưu tiên làm màn hình quầy ở phiên bản sau (mục 4) |

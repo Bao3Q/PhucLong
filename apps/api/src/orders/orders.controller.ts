@@ -15,6 +15,8 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { toOrderResponse } from './dto/order-response.dto';
 import { JwtAuthGuard } from '../common/auth/jwt-auth.guard';
+import { RolesGuard } from '../common/auth/roles.guard';
+import { Roles } from '../common/auth/roles.decorator';
 import type { AuthUser } from '../common/auth/auth-user.interface';
 
 @Controller('orders')
@@ -49,9 +51,11 @@ export class OrdersController {
     return toOrderResponse(await this.ordersService.findOne(id, request.user));
   }
 
-  // Chuyển trạng thái đơn (chủ đơn hoặc ADMIN); sai bước chuyển → 400
+  // FR-09: chỉ nhân viên quầy / ADMIN được chuyển trạng thái đơn
+  // (không có JWT → 401, CUSTOMER kể cả chủ đơn → 403); sai bước chuyển → 400
   @Patch(':id/status')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
   async updateStatus(
     @Req() request: Request & { user: AuthUser },
     @Param('id', ParseIntPipe) id: number,

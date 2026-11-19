@@ -9,6 +9,8 @@ import type { AuthUser } from '../common/auth/auth-user.interface';
 
 const customer: AuthUser = { id: 'u1', role: 'CUSTOMER' };
 const other: AuthUser = { id: 'u2', role: 'CUSTOMER' };
+/** Chỉ ADMIN / nhân viên quầy được chuyển trạng thái đơn (FR-09). */
+const staff: AuthUser = { id: 'staff', role: 'ADMIN' };
 
 const item = { productId: '1', size: OrderSize.S, qty: 1 };
 
@@ -25,7 +27,7 @@ describe('Order state và tồn kho (regression)', () => {
   it('chặn bước bị bỏ qua và đi hết luồng chính PAID → PREPARING → READY → COMPLETED', async () => {
     const order = await orders.createOrder(customer, { items: [item] });
     await expect(
-      orders.updateOrderStatus(customer, order.id, OrderStatus.READY),
+      orders.updateOrderStatus(staff, order.id, OrderStatus.READY),
     ).rejects.toThrow(BadRequestException);
     for (const status of [
       OrderStatus.PAID,
@@ -34,12 +36,12 @@ describe('Order state và tồn kho (regression)', () => {
       OrderStatus.COMPLETED,
     ]) {
       expect(
-        (await orders.updateOrderStatus(customer, order.id, status)).status,
+        (await orders.updateOrderStatus(staff, order.id, status)).status,
       ).toBe(status);
     }
     for (const status of Object.values(OrderStatus)) {
       await expect(
-        orders.updateOrderStatus(customer, order.id, status),
+        orders.updateOrderStatus(staff, order.id, status),
       ).rejects.toThrow(BadRequestException);
     }
     expect((await orders.findOne(order.id, customer)).status).toBe(
@@ -52,7 +54,7 @@ describe('Order state và tồn kho (regression)', () => {
     const order = await orders.createOrder(customer, { items: [item] });
     const results = await Promise.allSettled(
       Array.from({ length: 10 }, () =>
-        orders.updateOrderStatus(customer, order.id, OrderStatus.CANCELLED),
+        orders.updateOrderStatus(staff, order.id, OrderStatus.CANCELLED),
       ),
     );
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);

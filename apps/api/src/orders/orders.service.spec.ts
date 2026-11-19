@@ -15,6 +15,8 @@ const user: AuthUser = {
   email: 'customer@example.com',
   role: 'CUSTOMER',
 };
+/** Nhân viên quầy / ADMIN — người duy nhất được chuyển trạng thái đơn (FR-09). */
+const staff: AuthUser = { id: 'staff-id', role: 'ADMIN' };
 
 describe('OrdersService (nhánh in-memory, không cần DB)', () => {
   let service: OrdersService;
@@ -139,7 +141,7 @@ describe('OrdersService (nhánh in-memory, không cần DB)', () => {
     it('chặn bước bị bỏ qua và đi được hết luồng chính', async () => {
       const order = await service.createOrder(user, { items: [item] });
       await expect(
-        service.updateOrderStatus(user, order.id, OrderStatus.READY),
+        service.updateOrderStatus(staff, order.id, OrderStatus.READY),
       ).rejects.toThrow(BadRequestException);
       for (const status of [
         OrderStatus.PAID,
@@ -148,12 +150,12 @@ describe('OrdersService (nhánh in-memory, không cần DB)', () => {
         OrderStatus.COMPLETED,
       ]) {
         expect(
-          (await service.updateOrderStatus(user, order.id, status)).status,
+          (await service.updateOrderStatus(staff, order.id, status)).status,
         ).toBe(status);
       }
       // COMPLETED là trạng thái kết thúc
       await expect(
-        service.updateOrderStatus(user, order.id, OrderStatus.CANCELLED),
+        service.updateOrderStatus(staff, order.id, OrderStatus.CANCELLED),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -161,7 +163,7 @@ describe('OrdersService (nhánh in-memory, không cần DB)', () => {
       const order = await service.createOrder(user, { items: [item] });
       expect((await products.findOneFromStorage('1'))?.stock).toBe(48);
       const cancelled = await service.updateOrderStatus(
-        user,
+        staff,
         order.id,
         OrderStatus.CANCELLED,
       );
@@ -169,12 +171,18 @@ describe('OrdersService (nhánh in-memory, không cần DB)', () => {
       expect((await products.findOneFromStorage('1'))?.stock).toBe(50);
     });
 
-    it('người lạ không được chuyển trạng thái đơn của người khác', async () => {
+    it('khách hàng, kể cả chủ đơn, không được chuyển trạng thái (403)', async () => {
       const order = await service.createOrder(user, { items: [item] });
       const stranger: AuthUser = { id: 'other-user-id', role: 'CUSTOMER' };
+      // Chủ đơn tự chuyển sang PAID khi chưa trả tiền → bị chặn
+      await expect(
+        service.updateOrderStatus(user, order.id, OrderStatus.PAID),
+      ).rejects.toThrow(ForbiddenException);
       await expect(
         service.updateOrderStatus(stranger, order.id, OrderStatus.CANCELLED),
       ).rejects.toThrow(ForbiddenException);
+      // Đơn vẫn PENDING
+      expect((await service.findOne(order.id, user)).status).toBe(OrderStatus.PENDING);
     });
   });
 });

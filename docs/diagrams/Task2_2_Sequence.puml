@@ -3,7 +3,7 @@ skinparam backgroundColor white
 skinparam shadowing false
 skinparam defaultFontName DejaVu Sans
 skinparam defaultFontSize 13
-skinparam dpi 140
+skinparam dpi 130
 skinparam TitleFontSize 16
 skinparam ParticipantBackgroundColor white
 skinparam ParticipantBorderColor black
@@ -18,120 +18,102 @@ skinparam ArrowColor black
 skinparam SequenceDividerBackgroundColor white
 skinparam SequenceDividerBorderColor black
 skinparam SequenceGroupHeaderFontColor black
-skinparam NoteBackgroundColor white
-skinparam NoteBorderColor black
 skinparam sequenceMessageAlign left
 hide footbox
 title SEQUENCE DIAGRAM FOR UC-01: ĐẶT VÀ THANH TOÁN ĐƠN HÀNG (Sequence-01)
 
 actor "Customer" as C
-participant "UI: Next.js UI" as UI
-participant "API: NestJS API" as API
-participant "DB: Database\n(PostgreSQL)" as DB
-participant "PS: Payment Service\n(Ví / Thẻ mô phỏng)" as PS
+participant "Next.js UI" as UI
+participant "NestJS API" as API
+participant "Database" as DB
+participant "Payment Service\n(mô phỏng)" as PS
 
 == Đặt đơn (UC-01a) ==
 activate C
-C -> UI : datHang (cart, voucherCode, method)
+C -> UI : bấm "Xác nhận trả" (momo / card)
 activate UI
-break chưa có JWT (A2)
-  UI --> C : chuyển /login?next=/checkout (giữ giỏ hàng)
+break chưa đăng nhập (A2)
+  UI --> C : chuyển /login (giữ giỏ hàng)
 end
-UI -> API : POST /orders (Bearer JWT, items, voucherCode)
+UI -> API : POST /orders (JWT, items, voucherCode)
 activate API
-API -> API : verifyJWT (token)
-break JWT sai / hết hạn (E1)
-  API --> UI : 401 Unauthorized
-  UI --> C : chuyển trang đăng nhập
+API -> API : kiểm tra JWT, validate items
+break JWT sai (E1) / dữ liệu sai (E2)
+  API --> UI : 401 / 400
+  UI --> C : báo lỗi
 end
-API -> API : validate (items)
-API -> DB : getProducts (productIds)
+API -> DB : lấy giá sản phẩm
 activate DB
-DB --> API : products (giá)
+DB --> API : products
 deactivate DB
-break dữ liệu không hợp lệ / sản phẩm không tồn tại (E2, E3)
-  API --> UI : 400 / 404 + message
-  UI --> C : hiển thị lỗi, giữ giỏ hàng
+break sản phẩm không tồn tại (E3)
+  API --> UI : 404
+  UI --> C : báo lỗi
 end
-API -> API : tinhTien (items)
+API -> API : tính tiền (server tự tính giá)
 group Transaction tạo đơn + cập nhật tồn kho
-  API -> DB : BEGIN
-  opt có voucherCode (A1)
-    API -> DB : validatePromotion (code, subtotal)
-    DB --> API : discount
+  opt có mã giảm giá (A1)
+    API -> DB : kiểm tra mã
   end
   loop mỗi sản phẩm
-    API -> DB : reserveStock (PID, qty, version)
-    DB --> API : updated (0 / 1)
+    API -> DB : trừ tồn kho (theo version)
+    DB --> API : 0 / 1 dòng
   end
-  break hết hàng / xung đột (E4) hoặc mã sai (E5)
+  break mã sai (E5) / hết hàng / xung đột (E4)
     API -> DB : ROLLBACK
-    API --> UI : 400 / 409 + message
-    UI --> C : thông báo hết hàng / mã không hợp lệ
+    API --> UI : 400 / 409
+    UI --> C : báo hết hàng / mã sai
   end
-  API -> DB : insertOrder (UID, items, total, "PENDING")
-  API -> DB : COMMIT
-  DB --> API : order
+  API -> DB : tạo đơn PENDING, COMMIT
 end
 API --> UI : 201 order (PENDING)
 deactivate API
-UI -> UI : clearCart (), tạo Idempotency-Key
 
-== Thanh toán (UC-01b) ==
-UI -> API : POST /payments (Bearer JWT, Idempotency-Key, orderId, method)
+== Thanh toán Ví / Thẻ (UC-01b) ==
+UI -> UI : xoá giỏ, tạo Idempotency-Key
+UI -> API : POST /payments (JWT, Idempotency-Key, orderId, method)
 activate API
-API -> API : verifyJWT (token)
-API -> DB : findOrder (orderId)
+API -> API : kiểm tra JWT
+API -> DB : lấy đơn
 activate DB
 DB --> API : order
 deactivate DB
-break không phải chủ đơn (E2) / đơn đã PAID (E3)
-  API --> UI : 403 / 400 + message
-  UI --> C : hiển thị lỗi
+break JWT sai (E1) / không có đơn / không phải chủ đơn (E2)
+  API --> UI : 401 / 404 / 403
+  UI --> C : báo lỗi
 end
-API -> DB : findPayment (UID, Idempotency-Key)
+API -> DB : tìm Payment theo (user, key)
 activate DB
 DB --> API : payment | null
 deactivate DB
-break cùng key nhưng khác nội dung (E4)
-  API --> UI : 400 Idempotency-Key đã dùng
-  UI --> C : hiển thị lỗi
-end
-alt client gửi lại cùng Idempotency-Key, cùng nội dung (A1)
-  API --> UI : 201 payment đã lưu (không trừ tiền / kho lần hai)
+alt cùng key, cùng nội dung (A1)
+  API --> UI : 201 kết quả cũ (không trừ lần hai)
+else cùng key, khác nội dung (E4)
+  API --> UI : 400
 else key mới
-  API -> PS : charge (orderId, amount, method)
+  break đơn đã PAID (E3)
+    API --> UI : 400
+  end
+  API -> PS : charge (method, total)
   activate PS
-  PS --> API : result (transactionId)
+  PS --> API : transactionId
   deactivate PS
   group Transaction thanh toán
-    API -> DB : BEGIN
-    API -> DB : deductCups (size, qty), deductIngredients (recipe)
-    DB --> API : result
-    alt thanh toán thành công (đủ ly và nguyên liệu)
-      API -> DB : updateOrder (orderId, "PAID")
-      API -> DB : addLoyaltyPoints (UID, points)
-      API -> DB : insertPayment (orderId, method, "PAID", key)
-      API -> DB : COMMIT
-      API --> UI : 201 Message (PAID, transactionId)
-    else thanh toán thất bại (bị từ chối / thiếu ly, nguyên liệu E5 / lỗi E6)
+    API -> DB : trừ ly + nguyên liệu
+    alt đủ ly và nguyên liệu
+      API -> DB : đơn PAID, cộng điểm, ghi Payment, COMMIT
+      API --> UI : 201 PAID (transactionId)
+    else thiếu ly / nguyên liệu (E5) hoặc lỗi (E6)
       API -> DB : ROLLBACK
-      API --> UI : 400 Error (lý do), đơn vẫn PENDING
+      API --> UI : 400 (đơn vẫn PENDING)
     end
   end
 end
 deactivate API
-alt PAID
-  UI --> C : "Đặt hàng thành công", trang /orders/:id hiển thị "Đã thanh toán"
+alt thành công
+  UI --> C : trang "Đặt hàng thành công"
 else thất bại
-  UI --> C : thông báo thất bại, nút thử lại
+  UI --> C : báo lỗi, cho thanh toán lại
 end
 deactivate UI
-note over PS
-  Dịch vụ mô phỏng luôn chấp nhận;
-  thất bại thực tế đến từ thiếu ly /
-  nguyên liệu hoặc lỗi DB (rollback).
-  Luồng thay thế A2 (SePay):
-  xem Task2_1_Activity_SePay.
-end note
 @enduml

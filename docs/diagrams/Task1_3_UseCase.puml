@@ -1,4 +1,4 @@
-@startuml
+@startuml Task1_3_UseCase
 skinparam backgroundColor white
 skinparam monochrome true
 skinparam shadowing false
@@ -6,41 +6,42 @@ skinparam roundCorner 0
 skinparam defaultFontName DejaVu Sans
 skinparam defaultFontSize 14
 skinparam ArrowColor black
-skinparam dpi 160
+skinparam dpi 150
 skinparam packageStyle rectangle
 left to right direction
 
 title Task 1.3 - Use-case UC-01: Đặt và thanh toán đơn hàng
 
 actor "Khách hàng" as KH
-actor "Dịch vụ thanh toán\n(mô phỏng)" as PAY
 
 rectangle "UC-01: Đặt và thanh toán đơn hàng" {
-  usecase "Thêm món vào giỏ\n(size, topping, ghi chú)" as ADD
+  usecase "Thêm món vào giỏ" as ADD
   usecase "Quản lý giỏ hàng" as CART
+  usecase "Áp mã khuyến mãi" as PROMO
   usecase "Đặt đơn" as ORDER
   usecase "Đăng nhập" as LOGIN
-  usecase "Thanh toán\n(Ví MoMo / Thẻ)" as PAYUC
-  usecase "Áp mã khuyến mãi" as PROMO
-  usecase "Gửi lại yêu cầu thanh toán\n(cùng Idempotency-Key)" as RETRY
+  usecase "Thanh toán đơn" as PAYUC
+  usecase "Thanh toán Ví / Thẻ" as WALLET
+  usecase "Thanh toán QR SePay" as QR
+  usecase "Gửi lại cùng\nIdempotency-Key" as RETRY
   usecase "Xem xác nhận đơn" as CONFIRM
 }
+
+actor "Dịch vụ thanh toán\nmô phỏng" as PAY
+actor "Cổng SePay" as SEPAY
 
 KH --> ADD
 KH --> CART
 KH --> ORDER
 KH --> CONFIRM
-PAYUC --> PAY
 
 ORDER ..> LOGIN : <<include>>
 ORDER ..> PAYUC : <<include>>
-PROMO ..> ORDER : <<extend>>\n[có mã hợp lệ]
-RETRY ..> PAYUC : <<extend>>\n[mất kết nối / bấm lại]
+PROMO ..> ORDER : <<extend>>
+PAYUC <|-- WALLET
+PAYUC <|-- QR
+RETRY ..> WALLET : <<extend>>
 
-note right of PAYUC
-  Liên kết yêu cầu:
-  FR-02, FR-03, FR-05,
-  FR-06, FR-07, FR-08
-  NFR-02 (JWT)
-end note
+WALLET --> PAY
+QR --> SEPAY
 @enduml

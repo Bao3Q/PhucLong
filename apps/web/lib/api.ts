@@ -253,7 +253,7 @@ export function createOrder(
   );
 }
 
-/** PATCH /orders/:id/status — chuyển trạng thái (chủ đơn hoặc ADMIN). */
+/** PATCH /orders/:id/status — chuyển trạng thái (chỉ ADMIN / nhân viên quầy). */
 export function updateOrderStatus(
   id: string | number,
   status: OrderStatus,

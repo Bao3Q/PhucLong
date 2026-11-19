@@ -241,7 +241,7 @@ export class OrdersService {
   }
 
   /**
-   * PATCH /orders/:id/status – Chuyển trạng thái đơn (chủ đơn hoặc ADMIN).
+   * PATCH /orders/:id/status – Chuyển trạng thái đơn (chỉ ADMIN / nhân viên quầy, FR-09).
    * assertTransition chặn bước không hợp lệ; hủy đơn (CANCELLED) hoàn tồn kho.
    */
   async updateOrderStatus(
@@ -249,12 +249,16 @@ export class OrdersService {
     orderId: number,
     nextStatus: OrderStatus,
   ): Promise<OrderResponseDto> {
+    // Chặn thêm ở tầng service (route đã có RolesGuard): khách, kể cả chủ đơn,
+    // không được tự đổi trạng thái — tránh tự chuyển đơn sang PAID khi chưa trả tiền.
+    if (user.role !== 'ADMIN') {
+      throw new ForbiddenException(
+        'Chỉ nhân viên quầy / ADMIN được cập nhật trạng thái đơn hàng',
+      );
+    }
     const order = await this.ordersRepository.findById(orderId);
     if (!order) {
       throw new NotFoundException(`Không tìm thấy đơn hàng #${orderId}`);
-    }
-    if (user.role !== 'ADMIN' && order.userId !== user.id) {
-      throw new ForbiddenException('Chỉ được cập nhật đơn hàng của chính mình');
     }
 
     // Chặn sớm chuyển trạng thái không hợp lệ (trong transaction còn kiểm tra lại).

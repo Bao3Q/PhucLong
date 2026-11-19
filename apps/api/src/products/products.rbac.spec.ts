@@ -234,4 +234,52 @@ describe('Auth + phân quyền (e2e)', () => {
         .expect(400);
     });
   });
+
+  describe('PATCH /orders/:id/status — chỉ ADMIN / nhân viên quầy (FR-09)', () => {
+    let orderId: number;
+
+    beforeAll(async () => {
+      const res = await request(http)
+        .post('/orders')
+        .set('Authorization', `Bearer ${customerToken}`)
+        .send({ items: [{ productId: '1', size: 'S', qty: 1 }] })
+        .expect(201);
+      orderId = res.body.id;
+    });
+
+    it('không có token → 401', async () => {
+      await request(http)
+        .patch(`/orders/${orderId}/status`)
+        .send({ status: 'PAID' })
+        .expect(401);
+    });
+
+    it('CUSTOMER là chủ đơn tự chuyển sang PAID → 403, đơn vẫn PENDING', async () => {
+      await request(http)
+        .patch(`/orders/${orderId}/status`)
+        .set('Authorization', `Bearer ${customerToken}`)
+        .send({ status: 'PAID' })
+        .expect(403);
+      const detail = await request(http)
+        .get(`/orders/${orderId}`)
+        .set('Authorization', `Bearer ${customerToken}`)
+        .expect(200);
+      expect(detail.body.status).toBe('PENDING');
+    });
+
+    it('ADMIN chuyển đúng bước → 200, sai bước → 400', async () => {
+      const auth = { Authorization: `Bearer ${adminToken}` };
+      const paid = await request(http)
+        .patch(`/orders/${orderId}/status`)
+        .set(auth)
+        .send({ status: 'PAID' })
+        .expect(200);
+      expect(paid.body.status).toBe('PAID');
+      await request(http)
+        .patch(`/orders/${orderId}/status`)
+        .set(auth)
+        .send({ status: 'COMPLETED' })
+        .expect(400);
+    });
+  });
 });

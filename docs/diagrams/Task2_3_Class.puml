@@ -3,7 +3,7 @@ skinparam backgroundColor white
 skinparam shadowing false
 skinparam defaultFontName DejaVu Sans
 skinparam defaultFontSize 13
-skinparam dpi 140
+skinparam dpi 130
 skinparam TitleFontSize 16
 skinparam classAttributeIconSize 0
 skinparam ClassBackgroundColor white
@@ -13,37 +13,22 @@ skinparam ClassAttributeFontColor black
 skinparam ClassStereotypeFontColor black
 skinparam ArrowColor black
 skinparam ArrowFontColor black
-skinparam NoteBackgroundColor white
-skinparam NoteBorderColor black
-skinparam nodesep 60
-skinparam ranksep 70
+skinparam PackageBorderColor black
+skinparam nodesep 50
+skinparam ranksep 60
 hide circle
+hide empty members
 title Class-01: SƠ ĐỒ LỚP MỨC DOMAIN — BREWLITE (PHÚC LONG)
 
 class User {
-  - id : UUID
+  - id : String
   - email : String
   - passwordHash : String
   - role : UserRole
   - loyaltyPoints : int
-  - createdAt : DateTime
   --
   + register()
   + login() : JWT
-  + getOrderHistory() : Order[]
-}
-class Product {
-  - id : String
-  - name : String
-  - category : String
-  - price : int
-  - imageUrl : String
-  - description : String
-  - stock : int
-  - version : int
-  --
-  + reserveStock(qty : int)
-  + restoreStock(qty : int)
 }
 class Order {
   - id : int
@@ -54,12 +39,10 @@ class Order {
   - total : int
   - createdAt : DateTime
   --
-  + calculateTotal() : int
-  + changeStatus(next : OrderStatus)
-  + cancel()
+  + createOrder()
+  + updateStatus(next)
 }
 class OrderItem {
-  - id : int
   - productName : String
   - size : ProductSize
   - toppings : String[]
@@ -68,24 +51,29 @@ class OrderItem {
   - unitPrice : int
   - lineTotal : int
 }
+class Product {
+  - id : String
+  - name : String
+  - category : String
+  - price : int
+  - stock : int
+  - version : int
+}
 class Payment {
   - id : int
   - method : PaymentMethod
-  - amount : int
   - status : PaymentStatus
+  - success : boolean
+  - amount : int
   - idempotencyKey : String
-  - transactionId : String
-  - paymentCode : String
+  - result : Json
   - expiresAt : DateTime
   - paidAt : DateTime
   --
-  + pay()
-  + confirm()
+  + processPayment()
 }
 class Promotion {
-  - id : int
   - code : String
-  - name : String
   - discountType : DiscountType
   - discountValue : int
   - maxDiscountAmount : int
@@ -96,82 +84,80 @@ class Promotion {
   - startsAt : DateTime
   - endsAt : DateTime
   --
-  + validate(subtotal : int) : boolean
-  + calculateDiscount(subtotal : int) : int
+  + validatePromotion()
 }
 class LoyaltyTransaction {
-  - id : int
   - type : LoyaltyTransactionType
   - points : int
   - balanceAfter : int
-  - description : String
   - createdAt : DateTime
 }
+class RecipeItem {
+  - size : ProductSize
+  {field} - amount : Decimal
+}
+class Ingredient {
+  - name : String
+  {field} - quantity : Decimal
+  - unit : String
+}
+class Cup {
+  - size : ProductSize
+  - quantity : int
+}
 
-enum OrderStatus <<enumeration>> {
-  PENDING
-  PAID
-  PAYMENT_FAILED
-  PREPARING
-  READY
-  COMPLETED
-  CANCELLED
-}
-enum PaymentStatus <<enumeration>> {
-  PENDING
-  PAID
-  EXPIRED
-  FAILED
-}
-enum PaymentMethod <<enumeration>> {
-  MOMO
-  CARD
-  SEPAY
-}
-enum UserRole <<enumeration>> {
-  CUSTOMER
-  ADMIN
-}
-enum ProductSize <<enumeration>> {
-  S
-  M
-  L
-}
-enum DiscountType <<enumeration>> {
-  PERCENT
-  FIXED
-}
-enum LoyaltyTransactionType <<enumeration>> {
-  EARN
-  REDEEM
-  ADJUST
-  EXPIRE
+package "Enum" <<Rectangle>> {
+  enum OrderStatus {
+    PENDING
+    PAID
+    PAYMENT_FAILED
+    PREPARING
+    READY
+    COMPLETED
+    CANCELLED
+  }
+  enum PaymentStatus {
+    PENDING
+    PAID
+    EXPIRED
+    FAILED
+  }
+  enum PaymentMethod {
+    momo
+    card
+    sepay
+  }
+  enum UserRole {
+    CUSTOMER
+    ADMIN
+  }
+  enum ProductSize {
+    S
+    M
+    L
+  }
+  enum DiscountType {
+    PERCENT
+    FIXED
+  }
+  enum LoyaltyTransactionType {
+    EARN
+    REDEEM
+    ADJUST
+    EXPIRE
+  }
 }
 
 User "1" -- "0..*" Order : places >
-Order "1" *-- "1..*" OrderItem : contains >
-OrderItem "0..*" --> "1" Product : refers to >
-Order "1" -- "0..*" Payment : paid by >
 User "1" -- "0..*" Payment : makes >
-Order "0..*" --> "0..1" Promotion : applies >
 User "1" *-- "0..*" LoyaltyTransaction : owns >
+Order "1" *-- "1..*" OrderItem : contains >
+Order "1" -- "0..*" Payment : paid by >
+Order "0..*" --> "0..1" Promotion : applies >
 Order "0..1" -- "0..*" LoyaltyTransaction : earns >
+OrderItem "0..*" --> "1" Product : refers to >
+Product "1" *-- "0..*" RecipeItem : recipe >
+RecipeItem "0..*" --> "1" Ingredient : uses >
 
-User ..> UserRole
-Order ..> OrderStatus
-OrderItem ..> ProductSize
-Payment ..> PaymentStatus
-Payment ..> PaymentMethod
-Promotion ..> DiscountType
-LoyaltyTransaction ..> LoyaltyTransactionType
-
-note bottom of Payment
-  UNIQUE (userId, idempotencyKey):
-  gửi lại cùng key không tạo thanh toán mới.
-  method/status lưu dạng text trong DB.
-end note
-note right of Product
-  version: khoá lạc quan (optimistic lock)
-  khi trừ tồn kho lúc tạo đơn
-end note
+Cup -[hidden]right- RecipeItem
 @enduml
