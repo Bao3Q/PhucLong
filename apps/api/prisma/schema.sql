@@ -121,14 +121,11 @@ CREATE TABLE "Payment" (
     "userId" TEXT NOT NULL,
     "orderId" INTEGER NOT NULL,
     "method" TEXT NOT NULL,
-    "success" BOOLEAN NOT NULL,
     "idempotencyKey" TEXT,
-    "requestFingerprint" TEXT NOT NULL,
     "result" JSONB NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "amount" INTEGER NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'PENDING',
-    "paymentCode" TEXT,
     "expiresAt" TIMESTAMP(3),
     "paidAt" TIMESTAMP(3),
 
@@ -208,9 +205,6 @@ CREATE INDEX "OrderItem_orderId_idx" ON "OrderItem"("orderId");
 
 -- CreateIndex
 CREATE INDEX "OrderItem_productId_idx" ON "OrderItem"("productId");
-
--- CreateIndex
-CREATE UNIQUE INDEX "Payment_paymentCode_key" ON "Payment"("paymentCode");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Payment_userId_idempotencyKey_key" ON "Payment"("userId", "idempotencyKey");

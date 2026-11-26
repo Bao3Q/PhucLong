@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import { clearToken, subscribeToken } from '@/lib/auth';
+import { useCart } from '@/lib/cart';
 
 /** Đọc trạng thái đăng nhập, an toàn khi render phía server (luôn "chưa đăng nhập"). */
 export function useIsLoggedIn(): boolean {
@@ -17,11 +18,13 @@ export function useIsLoggedIn(): boolean {
 export default function AuthNav() {
   const loggedIn = useIsLoggedIn();
   const router = useRouter();
+  const { setCart } = useCart();
 
   if (loggedIn) {
     return (
       <button
         onClick={() => {
+          setCart([]);
           clearToken();
           router.push('/');
         }}

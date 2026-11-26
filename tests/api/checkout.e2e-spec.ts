@@ -263,7 +263,7 @@ describe('API tạo đơn và thanh toán (integration, PostgreSQL thật)', () 
       select: { points: true, balanceAfter: true },
     })).toEqual([{ points: -Math.floor(order.total / 10000), balanceAfter: original.points }]);
     expect(await db.payment.findFirst({ where: { orderId: order.id } }))
-      .toMatchObject({ status: 'REFUNDED', success: true });
+      .toMatchObject({ status: 'REFUNDED' });
   });
 
   it('INT-T10 hủy đơn chưa trả tiền đóng phiên QR và giữ nguyên điểm', async () => {
@@ -273,7 +273,7 @@ describe('API tạo đơn và thanh toán (integration, PostgreSQL thật)', () 
     await request(http).patch(`/orders/${order.id}/status`)
       .set(bearer(tokenA)).send({ status: 'CANCELLED' }).expect(200);
     expect(await db.payment.findFirst({ where: { orderId: order.id } }))
-      .toMatchObject({ status: 'EXPIRED', success: false });
+      .toMatchObject({ status: 'EXPIRED' });
     expect(await db.loyaltyTransaction.count({ where: { orderId: order.id } })).toBe(0);
   });
 
@@ -281,11 +281,13 @@ describe('API tạo đơn và thanh toán (integration, PostgreSQL thật)', () 
     const order = await createOrder(tokenA);
     const { checkout, webhook } = sepay(tokenA, order.id);
     await checkout().expect(201);
-    await webhook({ transferAmount: order.total }).expect(200);
+    const event = { id: Date.now(), transferAmount: order.total };
+    await webhook(event).expect(200);
     await request(http).patch(`/orders/${order.id}/status`)
       .set(bearer(tokenAdmin)).send({ status: 'CANCELLED' }).expect(200);
     const payment = await app.get(PrismaService).payment.findFirstOrThrow({ where: { orderId: order.id } });
-    expect(payment).toMatchObject({ status: 'REFUND_PENDING', success: true });
+    expect(payment).toMatchObject({ status: 'REFUND_PENDING' });
+    await webhook(event).expect(200);
     const queue = () => request(http).get('/payments/refunds').set(bearer(tokenAdmin)).expect(200);
     expect((await queue()).body).toContainEqual(expect.objectContaining({ id: payment.id }));
     await request(http).get('/payments/refunds').set(bearer(tokenA)).expect(403);
@@ -297,6 +299,8 @@ describe('API tạo đơn và thanh toán (integration, PostgreSQL thật)', () 
       .set(bearer(tokenA)).send({ reference }).expect(403);
     await confirm(reference).expect(200, { id: payment.id, status: 'REFUNDED', reference });
     await confirm(reference).expect(200);
+    await webhook(event).expect(200);
+    expect(await orderStatus(tokenA, order.id)).toBe('CANCELLED');
     await confirm('OTHER-REFERENCE').expect(409);
     expect((await queue()).body).not.toContainEqual(expect.objectContaining({ id: payment.id }));
   });

@@ -52,10 +52,8 @@ const storedPayment = {
   orderId: 1,
   userId: 'test-user-id',
   method: 'momo',
-  success: true,
   status: 'PAID',
   amount: 100000,
-  requestFingerprint: '1:momo',
   result: { transactionId: 'TXN-MOMO-123456' },
   idempotencyKey: 'idem-1',
   createdAt: now,
@@ -206,7 +204,7 @@ describe('PaymentsService', () => {
   it('key đã dùng nhưng khác nội dung (method khác) → 400', async () => {
     prisma.payment.findFirst.mockResolvedValue({
       ...storedPayment,
-      requestFingerprint: '1:card',
+      method: 'card',
     });
 
     await expect(service.processPayment(1, 'momo', 'idem-1')).rejects.toThrow(

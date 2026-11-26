@@ -35,6 +35,9 @@ interface SePayConfig {
 }
 
 /** Đơn còn chờ trả tiền: mới tạo, hoặc phiên trước đã hết hạn / thất bại. */
+const hasReceivedPayment = (status?: string) =>
+  status === 'PAID' || status === 'REFUND_PENDING' || status === 'REFUNDED';
+
 const isAwaitingPayment = (status: string) =>
   status === OrderStatus.PENDING || status === OrderStatus.PAYMENT_FAILED;
 
@@ -113,7 +116,7 @@ export class SepayService {
     const existing = await tx.payment.findUnique({
       where: { userId_idempotencyKey: { userId, idempotencyKey } },
     });
-    if (existing?.success) {
+    if (hasReceivedPayment(existing?.status)) {
       throw new ConflictException('Đơn hàng đã được thanh toán');
     }
     if (existing && existing.amount !== order.total) {
@@ -131,8 +134,6 @@ export class SepayService {
           idempotencyKey,
           amount: order.total,
           method: 'sepay',
-          success: false,
-          requestFingerprint: `sepay:${orderId}:${order.total}`,
           result: this.pendingResult(orderId),
           status: 'PENDING',
           expiresAt: newExpiry(),
@@ -232,7 +233,7 @@ export class SepayService {
     if (event.transferAmount !== payment.amount) {
       throw new BadRequestException('Số tiền SePay không khớp với đơn hàng');
     }
-    if (payment.success) {
+    if (hasReceivedPayment(payment.status)) {
       return this.alreadyPaid(payment.result, event.id);
     }
     if (!payment.expiresAt || payment.expiresAt.getTime() <= Date.now()) {
@@ -250,15 +251,14 @@ export class SepayService {
       const claim = await tx.payment.updateMany({
         where: {
           id: payment.id,
-          success: false,
           status: 'PENDING',
           expiresAt: { gt: new Date() },
         },
-        data: { success: true, status: 'PAID', paidAt: new Date() },
+        data: { status: 'PAID', paidAt: new Date() },
       });
       if (claim.count === 0) {
         const winner = await tx.payment.findUnique({ where: { id: payment.id } });
-        if (!winner?.success) {
+        if (!winner || !hasReceivedPayment(winner.status)) {
           throw new ConflictException('Phiên thanh toán SePay đã đóng hoặc hết hạn');
         }
         return this.alreadyPaid(winner.result, event.id);

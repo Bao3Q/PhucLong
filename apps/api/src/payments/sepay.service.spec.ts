@@ -58,8 +58,8 @@ describe('SepayService', () => {
         }),
         update: jest.fn(async ({ data }: { data: object }) => Object.assign(payment, data)),
         updateMany: jest.fn(
-          async ({ where, data }: { where: { success: boolean }; data: object }) => {
-            if (payment.success !== where.success) return { count: 0 };
+          async ({ where, data }: { where: { status: string; expiresAt: { gt: Date } }; data: object }) => {
+            if (payment.status !== where.status || payment.expiresAt <= where.expiresAt.gt) return { count: 0 };
             Object.assign(payment, data);
             return { count: 1 };
           },
@@ -174,7 +174,7 @@ describe('SepayService', () => {
 
       order.status = OrderStatus.PENDING;
       await service.createCheckout('user-1', 17);
-      getPayment().success = true;
+      getPayment().status = 'PAID';
       await expect(service.createCheckout('user-1', 17)).rejects.toThrow(/đã được thanh toán/);
 
       delete process.env.SEPAY_ACCOUNT_NAME;
@@ -198,7 +198,6 @@ describe('SepayService', () => {
       expect(payments.fulfillOrder).toHaveBeenCalledTimes(1);
       expect(payments.fulfillOrder).toHaveBeenCalledWith(tx, expect.objectContaining({ id: 17 }));
       expect(getPayment()).toMatchObject({
-        success: true,
         status: 'PAID',
         result: expect.objectContaining({
           sepayTransactionId: '98231',
@@ -223,10 +222,10 @@ describe('SepayService', () => {
     it('hai webhook song song: bên claim thua nhận ra giao dịch trùng và không hoàn tất', async () => {
       const { service, tx, payments } = setup();
       await service.createCheckout('user-1', 17);
-      // Bên kia claim xong ngay sau bước kiểm tra: updateMany thấy success đã true
+      // Bên kia claim xong ngay sau bước kiểm tra: updateMany thấy trạng thái đã là PAID
       tx.payment.updateMany.mockImplementationOnce(async () => {
         Object.assign((await tx.payment.findUnique()) as object, {
-          success: true,
+          status: 'PAID',
           result: { sepayTransactionId: '98231' },
         });
         return { count: 0 };
@@ -270,7 +269,7 @@ describe('SepayService', () => {
         arrange?.(ctx);
         await expect(ctx.service.handleWebhook({ ...event, ...patch })).rejects.toThrow(error);
         expect(ctx.payments.fulfillOrder).not.toHaveBeenCalled();
-        expect(ctx.getPayment().success).toBe(false);
+        expect(ctx.getPayment().status).toBe('PENDING');
       }
 
       it('không phải tiền vào', () => rejected({ transferType: 'out' }, BadRequestException));

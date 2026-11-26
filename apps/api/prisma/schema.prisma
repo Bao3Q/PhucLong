@@ -135,25 +135,18 @@ model OrderItem {
   @@index([productId])
 }
 
-// Lưu ý: DB thật dùng Payment của team thanh toán (method TEXT, success BOOLEAN,
-// result JSONB) nên model dưới đây khớp theo database, không dùng enum
-// PaymentMethod/PaymentStatus như thiết kế ban đầu trong schema.sql.
-
 model Payment {
   id                 Int      @id @default(autoincrement())
   userId             String
   orderId            Int
   method             String
-  success            Boolean
   idempotencyKey     String?
-  requestFingerprint String
   result             Json
   createdAt          DateTime @default(now())
   amount             Int
 
   // Luồng SePay (chuyển khoản QR): phiên thanh toán có thời hạn
-  status      String    @default("PENDING") // PENDING | PAID | EXPIRED | FAILED
-  paymentCode String?   @unique
+  status      String    @default("PENDING") // PENDING | PAID | EXPIRED | FAILED | REFUND_PENDING | REFUNDED
   expiresAt   DateTime?
   paidAt      DateTime?
 

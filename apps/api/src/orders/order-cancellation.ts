@@ -17,7 +17,7 @@ export async function cancelOrderPayments(
   if (order.status !== OrderStatus.PAID) return;
 
   const payments = await tx.payment.findMany({
-    where: { orderId: order.id, status: 'PAID', success: true },
+    where: { orderId: order.id, status: 'PAID' },
   });
   for (const payment of payments) {
     const result = asObject(payment.result);

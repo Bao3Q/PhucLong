@@ -41,13 +41,11 @@ export class PaymentsService {
     const order = await this.ordersService.findOne(orderId, user);
 
     const payMethod = method || 'card';
-    // Vân tay nội dung: cùng key nhưng khác nội dung (đơn/method) là bị cấm.
-    const requestFingerprint = `${order.id}:${payMethod}`;
 
     // Replay phải đứng TRƯỚC mọi chặn nghiệp vụ: client retry sau timeout
     // (khi đơn đã PAID) vẫn phải nhận lại kết quả đã lưu chứ không phải lỗi.
     if (idempotencyKey) {
-      const replay = await this.findReplay(order.userId, idempotencyKey, requestFingerprint);
+      const replay = await this.findReplay(order.userId, idempotencyKey, order.id, payMethod);
       if (replay) return replay;
     }
 
@@ -68,9 +66,7 @@ export class PaymentsService {
             userId: order.userId,
             orderId: order.id,
             method: payMethod,
-            success: true,
             idempotencyKey,
-            requestFingerprint,
             result: { transactionId, status: 'SUCCEEDED', inventoryDebits },
             amount: order.total,
             status: 'PAID',
@@ -82,7 +78,7 @@ export class PaymentsService {
     } catch (error) {
       // Nếu yêu cầu cùng khóa vừa hoàn tất, trả lại kết quả đã ghi.
       if (idempotencyKey && (isUniqueViolation(error) || error instanceof BadRequestException || error instanceof ConflictException)) {
-        const replay = await this.findReplay(order.userId, idempotencyKey, requestFingerprint);
+        const replay = await this.findReplay(order.userId, idempotencyKey, order.id, payMethod);
         if (replay) return replay;
       }
       throw error;
@@ -97,13 +93,14 @@ export class PaymentsService {
   private async findReplay(
     userId: string,
     idempotencyKey: string,
-    requestFingerprint: string,
+    orderId: number,
+    method: PaymentRecord['method'],
   ): Promise<PaymentRecord | null> {
     const existing = await this.prisma.payment.findFirst({
       where: { userId, idempotencyKey },
     });
     if (!existing) return null;
-    if (existing.requestFingerprint !== requestFingerprint) {
+    if (existing.orderId !== orderId || existing.method !== method) {
       throw new BadRequestException(
         'Idempotency-Key đã được dùng cho một yêu cầu khác, vui lòng dùng khóa mới.',
       );
@@ -262,7 +259,7 @@ export class PaymentsService {
   }
 
   async confirmSepayRefund(id: number, reference: string, confirmedBy: string) {
-    const where = { id, method: 'sepay', success: true };
+    const where = { id, method: 'sepay', status: { in: ['PAID', 'REFUND_PENDING', 'REFUNDED'] } };
     const payment = await this.prisma.payment.findFirst({ where });
     if (!payment) throw new NotFoundException('Không tìm thấy thanh toán SePay');
     if (payment.status === 'REFUND_PENDING') {
