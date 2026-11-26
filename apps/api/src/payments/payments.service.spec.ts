@@ -158,7 +158,7 @@ describe('PaymentsService', () => {
     tx.cup.updateMany.mockResolvedValue({ count: 0 });
 
     await expect(service.processPayment(1, 'card')).rejects.toThrow(BadRequestException);
-    expect(orders.updateStatus).not.toHaveBeenCalled();
+    expect(tx.loyaltyTransaction.create).not.toHaveBeenCalled();
     expect(tx.payment.create).not.toHaveBeenCalled();
   });
 
@@ -189,7 +189,7 @@ describe('PaymentsService', () => {
     tx.ingredient.findUnique.mockResolvedValue({ name: 'Sữa' });
 
     await expect(service.processPayment(1, 'card')).rejects.toThrow(/Sữa/);
-    expect(orders.updateStatus).not.toHaveBeenCalled();
+    expect(tx.loyaltyTransaction.create).not.toHaveBeenCalled();
     expect(tx.payment.create).not.toHaveBeenCalled();
   });
 

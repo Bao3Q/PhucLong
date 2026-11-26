@@ -70,9 +70,13 @@ describe('SepayService', () => {
       $transaction: jest.fn(async (cb: (t: typeof tx) => Promise<unknown>) => cb(tx)),
       payment: { findUnique: jest.fn(async () => payment) },
     };
-    const orders = { findOne: jest.fn(async () => order) };
+    const orders = { findOne: jest.fn(async () => order), lockOrder: jest.fn() };
     const payments = {
-      fulfillOrder: jest.fn(async () => ({ earnedPoints: 12, totalPoints: 17 })),
+      fulfillOrder: jest.fn(async () => ({
+        earnedPoints: 12,
+        totalPoints: 17,
+        inventoryDebits: { cups: [], ingredients: [] },
+      })),
     };
     const service = new SepayService(
       orders as unknown as OrdersService,

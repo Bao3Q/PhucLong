@@ -25,21 +25,21 @@ describe('Order state và tồn kho (regression)', () => {
   it('chặn bước bị bỏ qua và đi hết luồng chính PAID → PREPARING → READY → COMPLETED', async () => {
     const order = await orders.createOrder(customer, { items: [item] });
     await expect(
-      orders.updateOrderStatus(customer, order.id, OrderStatus.READY),
+      orders.updateOrderStatus({ ...customer, role: 'ADMIN' }, order.id, OrderStatus.READY),
     ).rejects.toThrow(BadRequestException);
+    await orders.updateStatus(order.id, OrderStatus.PAID);
     for (const status of [
-      OrderStatus.PAID,
       OrderStatus.PREPARING,
       OrderStatus.READY,
       OrderStatus.COMPLETED,
     ]) {
       expect(
-        (await orders.updateOrderStatus(customer, order.id, status)).status,
+        (await orders.updateOrderStatus({ ...customer, role: 'ADMIN' }, order.id, status)).status,
       ).toBe(status);
     }
-    for (const status of Object.values(OrderStatus)) {
+    for (const status of [OrderStatus.PREPARING, OrderStatus.READY, OrderStatus.COMPLETED, OrderStatus.CANCELLED]) {
       await expect(
-        orders.updateOrderStatus(customer, order.id, status),
+        orders.updateOrderStatus({ ...customer, role: 'ADMIN' }, order.id, status),
       ).rejects.toThrow(BadRequestException);
     }
     expect((await orders.findOne(order.id, customer)).status).toBe(

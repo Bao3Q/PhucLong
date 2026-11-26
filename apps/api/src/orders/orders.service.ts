@@ -11,10 +11,12 @@ import { Prisma } from '../generated/prisma/client';
 import type { AuthUser } from '../common/auth/auth-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersRepository } from './orders.repository';
+import { cancelOrderPayments } from './order-cancellation';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { OrderResponseDto, toOrderResponse } from './dto/order-response.dto';
 import {
   Order,
+  OrderItem,
   OrderStatus,
   assertTransition,
 } from './entities/order.entity';
@@ -27,6 +29,13 @@ const VALID_TOPPINGS = new Set(Object.keys(TOPPINGS));
 
 /** Giới hạn độ dài ghi chú mỗi món. */
 const MAX_NOTE_LENGTH = 200;
+
+type NewOrder = {
+  userId: string;
+  items: Omit<OrderItem, 'id' | 'orderId'>[];
+  subtotal: number;
+  voucherCode?: string;
+};
 
 @Injectable()
 export class OrdersService {
@@ -72,9 +81,34 @@ export class OrdersService {
       }
     }
 
+    const pricedItems = await this.priceItems(items);
+    const subtotal = pricedItems.reduce((sum, item) => {
+      const nextSubtotal = sum + item.lineTotal;
+      if (!Number.isSafeInteger(nextSubtotal)) {
+        throw new BadRequestException('Tổng tiền đơn hàng không hợp lệ');
+      }
+      return nextSubtotal;
+    }, 0);
+
+    const draft: NewOrder = {
+      userId: user.id,
+      items: pricedItems,
+      subtotal,
+      voucherCode: createOrderDto.voucherCode?.trim().toUpperCase() || undefined,
+    };
+
+    const order = this.prisma
+      ? await this.createDatabaseOrder(this.prisma, draft)
+      : await this.createInMemoryOrder(draft);
+    return toOrderResponse(order);
+  }
+
+  private async priceItems(
+    items: CreateOrderDto['items'],
+  ): Promise<NewOrder['items']> {
     // Không bao giờ tin tên/giá do browser gửi lên: tra catalog và tính giá trên server.
     const catalog = this.productsService ?? new ProductsService(this.prisma);
-    const normalizedItems = await Promise.all(
+    return Promise.all(
       items.map(async (item) => {
         const product = await catalog.findOneFromStorage(item.productId);
         if (!product) {
@@ -99,149 +133,156 @@ export class OrdersService {
         };
       }),
     );
+  }
 
-    const subtotal = normalizedItems.reduce((sum, item) => {
-      const nextSubtotal = sum + item.lineTotal;
-      if (!Number.isSafeInteger(nextSubtotal)) {
-        throw new BadRequestException('Tổng tiền đơn hàng không hợp lệ');
-      }
-      return nextSubtotal;
-    }, 0);
+  private async priceWithVoucher(
+    { voucherCode, subtotal }: NewOrder,
+    tx?: Prisma.TransactionClient,
+  ) {
+    if (!voucherCode) {
+      return { discountAmount: 0, appliedVoucher: undefined, total: subtotal };
+    }
 
-    // Voucher được kiểm tra TRƯỚC khi trừ tồn kho để không giữ hàng vô nghĩa.
-    // Với nhánh DB, validate nằm trong transaction để đọc dòng Promotion mới nhất.
-    let discountAmount = 0;
-    let appliedVoucher: string | undefined;
-    let total = subtotal;
-    const voucherCode = createOrderDto.voucherCode?.trim().toUpperCase() || undefined;
     const promotions = this.promotionsService ?? new PromotionsService(this.prisma);
+    const applied = tx
+      ? await promotions.validatePromotion(voucherCode, subtotal, tx)
+      : await promotions.validatePromotion(voucherCode, subtotal);
+    return {
+      discountAmount: applied.discountAmount,
+      appliedVoucher: applied.code,
+      total: Math.max(0, subtotal - applied.discountAmount),
+    };
+  }
 
-    if (this.prisma) {
-      const quantities = this.aggregateQuantities(normalizedItems);
-      const createdOrderId = await this.prisma.$transaction(async (tx) => {
-        if (voucherCode) {
-          const applied = await promotions.validatePromotion(voucherCode, subtotal, tx);
-          discountAmount = applied.discountAmount;
-          appliedVoucher = applied.code;
-          total = Math.max(0, subtotal - discountAmount);
-        }
+  private async createDatabaseOrder(
+    prisma: PrismaService,
+    draft: NewOrder,
+  ): Promise<Order> {
+    const quantities = this.aggregateQuantities(draft.items);
+    const createdOrderId = await prisma.$transaction(async (tx) => {
+      // Kiểm tra voucher trong transaction, trước khi giữ tồn kho.
+      const { discountAmount, appliedVoucher, total } =
+        await this.priceWithVoucher(draft, tx);
+      await this.reserveDatabaseStock(tx, quantities);
 
-        // Thứ tự khóa nhất quán (sort theo id) tránh deadlock khi giỏ có món ngược nhau.
-        for (const [productId, qty] of [...quantities].sort(([a], [b]) =>
-          a.localeCompare(b),
-        )) {
-          const product = await tx.product.findUnique({
-            where: { id: productId },
-          });
-          if (!product) {
-            throw new NotFoundException(
-              `Sản phẩm với ID ${productId} không tồn tại`,
-            );
-          }
-          if (product.stock < qty) {
-            throw new BadRequestException(
-              `Sản phẩm "${product.name}" không đủ số lượng tồn kho (còn ${product.stock}, yêu cầu ${qty})`,
-            );
-          }
-          // Optimistic lock trên Product.version: chỉ một request giành được stock.
-          const updated = await tx.product.updateMany({
-            where: { id: productId, version: product.version, stock: { gte: qty } },
-            data: { stock: { decrement: qty }, version: { increment: 1 } },
-          });
-          if (updated.count !== 1) {
-            throw new ConflictException(
-              `Tồn kho sản phẩm "${product.name}" vừa được thay đổi, vui lòng thử lại`,
-            );
-          }
-        }
-
-        const created = await tx.order.create({
-          data: {
-            userId: user.id,
-            status: OrderStatus.PENDING,
-            subtotal,
-            discountAmount,
-            voucherCode: appliedVoucher ?? null,
-            total,
-            items: {
-              create: normalizedItems.map((item) => ({
-                productId: item.productId,
-                productName: item.productName,
-                size: item.size as 'S' | 'M' | 'L',
-                toppings: [...item.toppings],
-                note: item.note ?? null,
-                qty: item.qty,
-                unitPrice: item.unitPrice,
-                lineTotal: item.lineTotal,
-              })),
-            },
+      const created = await tx.order.create({
+        data: {
+          userId: draft.userId,
+          status: OrderStatus.PENDING,
+          subtotal: draft.subtotal,
+          discountAmount,
+          voucherCode: appliedVoucher ?? null,
+          total,
+          items: {
+            create: draft.items.map((item) => ({
+              productId: item.productId,
+              productName: item.productName,
+              size: item.size,
+              toppings: [...item.toppings],
+              note: item.note ?? null,
+              qty: item.qty,
+              unitPrice: item.unitPrice,
+              lineTotal: item.lineTotal,
+            })),
           },
-        });
-        if (appliedVoucher) {
-          // Lượt dùng voucher chỉ bị trừ khi đơn thực sự được tạo thành công.
-          await tx.promotion.update({
-            where: { code: appliedVoucher },
-            data: { usedCount: { increment: 1 } },
-          });
-        }
-        return created.id;
+        },
       });
-      const saved = await this.ordersRepository.findById(createdOrderId);
-      if (!saved) {
-        throw new NotFoundException('Không tìm thấy đơn hàng vừa tạo');
+      if (appliedVoucher) {
+        // Lượt dùng voucher chỉ bị trừ khi đơn thực sự được tạo thành công.
+        const redemption = await tx.promotion.updateMany({
+          where: {
+            code: appliedVoucher,
+            OR: [
+              { usageLimit: null },
+              { usedCount: { lt: tx.promotion.fields.usageLimit } },
+            ],
+          },
+          data: { usedCount: { increment: 1 } },
+        });
+        if (redemption.count !== 1) {
+          throw new BadRequestException(`Mã "${appliedVoucher}" đã hết lượt sử dụng`);
+        }
       }
-      return toOrderResponse(saved);
+      return created.id;
+    });
+    const saved = await this.ordersRepository.findById(createdOrderId);
+    if (!saved) {
+      throw new NotFoundException('Không tìm thấy đơn hàng vừa tạo');
     }
+    return saved;
+  }
 
-    // Nhánh in-memory (test): validate voucher → trừ stock qua mutex → tạo đơn.
-    if (voucherCode) {
-      const applied = await promotions.validatePromotion(voucherCode, subtotal);
-      discountAmount = applied.discountAmount;
-      appliedVoucher = applied.code;
-      total = Math.max(0, subtotal - discountAmount);
+  private async reserveDatabaseStock(
+    tx: Prisma.TransactionClient,
+    quantities: Map<string, number>,
+  ): Promise<void> {
+    // Thứ tự khóa nhất quán (sort theo id) tránh deadlock khi giỏ có món ngược nhau.
+    for (const [productId, qty] of [...quantities].sort(([a], [b]) =>
+      a.localeCompare(b),
+    )) {
+      const product = await tx.product.findUnique({
+        where: { id: productId },
+      });
+      if (!product) {
+        throw new NotFoundException(
+          `Sản phẩm với ID ${productId} không tồn tại`,
+        );
+      }
+      if (product.stock < qty) {
+        throw new BadRequestException(
+          `Sản phẩm "${product.name}" không đủ số lượng tồn kho (còn ${product.stock}, yêu cầu ${qty})`,
+        );
+      }
+      // Optimistic lock trên Product.version: chỉ một request giành được stock.
+      const updated = await tx.product.updateMany({
+        where: { id: productId, version: product.version, stock: { gte: qty } },
+        data: { stock: { decrement: qty }, version: { increment: 1 } },
+      });
+      if (updated.count !== 1) {
+        throw new ConflictException(
+          `Tồn kho sản phẩm "${product.name}" vừa được thay đổi, vui lòng thử lại`,
+        );
+      }
     }
+  }
 
-    const createAndSaveOrder = async (): Promise<OrderResponseDto> => {
+  private async createInMemoryOrder(draft: NewOrder): Promise<Order> {
+    const { discountAmount, appliedVoucher, total } =
+      await this.priceWithVoucher(draft);
+    const createAndSaveOrder = async (): Promise<Order> => {
       const orderId = this.ordersRepository.nextId();
       const now = new Date();
-      const newOrder: Order = {
+      return this.ordersRepository.save({
         id: orderId,
-        userId: user.id,
+        userId: draft.userId,
         status: OrderStatus.PENDING,
-        subtotal,
+        subtotal: draft.subtotal,
         discountAmount,
         voucherCode: appliedVoucher,
         total,
         createdAt: now,
         updatedAt: now,
-        items: normalizedItems.map((item) => ({
+        items: draft.items.map((item) => ({
+          ...item,
           id: this.ordersRepository.nextItemIdValue(),
           orderId,
-          productId: item.productId,
-          productName: item.productName,
-          size: item.size,
           toppings: [...item.toppings],
-          note: item.note,
-          qty: item.qty,
-          unitPrice: item.unitPrice,
-          lineTotal: item.lineTotal,
         })),
-      };
-      return toOrderResponse(await this.ordersRepository.save(newOrder));
+      });
     };
 
     if (!this.productsService) {
-      return await createAndSaveOrder();
+      return createAndSaveOrder();
     }
 
     return this.productsService.withStockReservation(
-      normalizedItems.map(({ productId, qty }) => ({ productId, qty })),
+      draft.items,
       createAndSaveOrder,
     );
   }
 
   /**
-   * PATCH /orders/:id/status – Chuyển trạng thái đơn (chủ đơn hoặc ADMIN).
+   * PATCH /orders/:id/status – ADMIN cập nhật tiến độ; khách chỉ hủy đơn chưa trả tiền.
    * assertTransition chặn bước không hợp lệ; hủy đơn (CANCELLED) hoàn tồn kho.
    */
   async updateOrderStatus(
@@ -257,18 +298,22 @@ export class OrdersService {
       throw new ForbiddenException('Chỉ được cập nhật đơn hàng của chính mình');
     }
 
+    const customerCancellation = user.role !== 'ADMIN';
+    if (customerCancellation && nextStatus !== OrderStatus.CANCELLED) {
+      throw new ForbiddenException('Chỉ nhân viên được cập nhật tiến độ đơn hàng');
+    }
+    if (nextStatus === OrderStatus.PAID || nextStatus === OrderStatus.PAYMENT_FAILED) {
+      throw new ForbiddenException('Trạng thái thanh toán do hệ thống thanh toán cập nhật');
+    }
+    this.assertCancellationAllowed(order.status, customerCancellation);
+
     // Chặn sớm chuyển trạng thái không hợp lệ (trong transaction còn kiểm tra lại).
     assertTransition(order.status, nextStatus);
 
     if (this.prisma) {
-      await this.prisma.$transaction(async (tx) => {
-        await this.applyStatusTransition(tx, orderId, nextStatus);
-      });
-      const updated = await this.ordersRepository.findById(orderId);
-      if (!updated) {
-        throw new NotFoundException(`Không tìm thấy đơn hàng #${orderId}`);
-      }
-      return toOrderResponse(updated);
+      return toOrderResponse(
+        await this.updateDatabaseStatus(this.prisma, orderId, nextStatus, customerCancellation),
+      );
     }
 
     const expectedStatus = order.status;
@@ -311,14 +356,7 @@ export class OrdersService {
     assertTransition(order.status, nextStatus);
 
     if (this.prisma) {
-      await this.prisma.$transaction(async (prismaTx) => {
-        await this.applyStatusTransition(prismaTx, orderId, nextStatus);
-      });
-      const updated = await this.ordersRepository.findById(orderId);
-      if (!updated) {
-        throw new NotFoundException(`Không tìm thấy đơn hàng #${orderId}`);
-      }
-      return updated;
+      return this.updateDatabaseStatus(this.prisma, orderId, nextStatus);
     }
 
     const expectedStatus = order.status;
@@ -347,6 +385,52 @@ export class OrdersService {
     return order;
   }
 
+  async lockOrder(tx: Prisma.TransactionClient, orderId: number): Promise<void> {
+    // Checkout, webhook và hủy đơn lấy cùng một khóa trước khi chạm vào Payment.
+    await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`;
+  }
+
+  async cancelExpiredOrder(orderId: number, cutoff: Date): Promise<void> {
+    if (!this.prisma) return;
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockOrder(tx, orderId);
+      const eligible = await tx.order.findFirst({
+        where: {
+          id: orderId,
+          status: { in: [OrderStatus.PENDING, OrderStatus.PAYMENT_FAILED] },
+          createdAt: { lt: cutoff },
+          payments: { none: { status: 'PENDING', expiresAt: { gt: new Date() } } },
+        },
+        select: { id: true },
+      });
+      if (eligible) {
+        await this.applyStatusTransition(tx, orderId, OrderStatus.CANCELLED);
+      }
+    });
+  }
+
+  private assertCancellationAllowed(status: string, customerCancellation: boolean): void {
+    if (customerCancellation && status === OrderStatus.PAID) {
+      throw new ForbiddenException('Đơn đã thanh toán cần nhân viên xử lý hoàn tiền');
+    }
+  }
+
+  private async updateDatabaseStatus(
+    prisma: PrismaService,
+    orderId: number,
+    nextStatus: OrderStatus,
+    customerCancellation = false,
+  ): Promise<Order> {
+    await prisma.$transaction(async (tx) => {
+      await this.applyStatusTransition(tx, orderId, nextStatus, customerCancellation);
+    });
+    const updated = await this.ordersRepository.findById(orderId);
+    if (!updated) {
+      throw new NotFoundException(`Không tìm thấy đơn hàng #${orderId}`);
+    }
+    return updated;
+  }
+
   /**
    * Lõi chuyển trạng thái chạy trong một transaction: re-read dòng mới nhất,
    * assertTransition lần nữa, hoàn tồn kho nếu hủy đơn, rồi CAS theo status cũ.
@@ -355,7 +439,9 @@ export class OrdersService {
     tx: Prisma.TransactionClient,
     orderId: number,
     nextStatus: OrderStatus,
+    customerCancellation = false,
   ): Promise<Order> {
+    await this.lockOrder(tx, orderId);
     const current = await tx.order.findUnique({
       where: { id: orderId },
       include: { items: true },
@@ -363,21 +449,12 @@ export class OrdersService {
     if (!current) {
       throw new NotFoundException(`Không tìm thấy đơn hàng #${orderId}`);
     }
+    this.assertCancellationAllowed(current.status, customerCancellation);
     assertTransition(current.status as OrderStatus, nextStatus);
 
     if (nextStatus === OrderStatus.CANCELLED) {
       // Hoàn stock theo thứ tự id đã sort để nhất quán với luồng trừ stock.
-      const quantities = this.aggregateQuantities(
-        current.items.map((item) => ({
-          productId: item.productId,
-          productName: item.productName,
-          size: item.size as 'S' | 'M' | 'L',
-          toppings: item.toppings,
-          qty: item.qty,
-          unitPrice: item.unitPrice,
-          lineTotal: item.lineTotal,
-        })),
-      );
+      const quantities = this.aggregateQuantities(current.items);
       for (const [productId, qty] of [...quantities].sort(([a], [b]) =>
         a.localeCompare(b),
       )) {
@@ -386,6 +463,7 @@ export class OrdersService {
           data: { stock: { increment: qty }, version: { increment: 1 } },
         });
       }
+      await cancelOrderPayments(tx, current);
     }
 
     const updated = await tx.order.updateMany({

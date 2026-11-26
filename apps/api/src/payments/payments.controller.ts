@@ -1,16 +1,24 @@
 import {
+  BadRequestException,
   Controller,
   Post,
   Get,
   Body,
   Headers,
+  Param,
+  ParseIntPipe,
+  Patch,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { PaymentsService } from './payments.service';
 import { SepayService } from './sepay.service';
+import { CreatePaymentDto } from './dto/create-payment.dto';
 import { CreateSePayCheckoutDto } from './dto/create-sepay-checkout.dto';
+import { ConfirmRefundDto } from './dto/confirm-refund.dto';
+import { Roles } from '../common/auth/roles.decorator';
+import { RolesGuard } from '../common/auth/roles.guard';
 import { JwtAuthGuard } from '../common/auth/jwt-auth.guard';
 import type { AuthUser } from '../common/auth/auth-user.interface';
 
@@ -28,13 +36,14 @@ export class PaymentsController {
   @Post()
   async pay(
     @Req() request: Request & { user: AuthUser },
-    @Body('orderId') orderId: string,
-    @Body('method') method: 'momo' | 'card',
+    @Body() dto: CreatePaymentDto,
     @Headers('idempotency-key') headerKey?: string,
-    @Body('idempotencyKey') bodyKey?: string,
   ) {
-    const key = headerKey || bodyKey;
-    return this.paymentsService.processPayment(orderId, method, key, request.user);
+    if (headerKey && headerKey.length > 200) {
+      throw new BadRequestException('Idempotency-Key quá dài');
+    }
+    const key = headerKey || dto.idempotencyKey;
+    return this.paymentsService.processPayment(dto.orderId, dto.method, key, request.user);
   }
 
   // Mở (hoặc lấy lại) phiên SePay của đơn: QR + hạn chót. Gọi lại khi phiên còn hạn
@@ -55,6 +64,27 @@ export class PaymentsController {
     @Body('orderId') orderId: number,
   ) {
     return this.sepayService.simulate(Number(orderId), request.user);
+  }
+
+  @Get('refunds')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  listPendingRefunds() {
+    return this.paymentsService.listPendingRefunds();
+  }
+
+  @Patch(':id/refund')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  confirmRefund(
+    @Req() request: Request & { user: AuthUser },
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ConfirmRefundDto,
+  ) {
+    if (id <= 0 || id > 2147483647) {
+      throw new BadRequestException('Mã thanh toán không hợp lệ');
+    }
+    return this.paymentsService.confirmSepayRefund(id, dto.reference, request.user.id);
   }
 
   // Điểm thưởng tích lũy của user đang đăng nhập.

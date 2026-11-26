@@ -49,7 +49,7 @@ export class OrdersController {
     return toOrderResponse(await this.ordersService.findOne(id, request.user));
   }
 
-  // Chuyển trạng thái đơn (chủ đơn hoặc ADMIN); sai bước chuyển → 400
+  // ADMIN cập nhật tiến độ; khách chỉ được huỷ đơn chưa trả tiền của mình.
   @Patch(':id/status')
   @UseGuards(JwtAuthGuard)
   async updateStatus(

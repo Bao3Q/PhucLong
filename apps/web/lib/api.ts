@@ -100,7 +100,7 @@ export interface PaymentRecord {
   orderId: number;
   method: 'momo' | 'card' | 'sepay';
   amount: number;
-  status: 'PENDING' | 'PAID' | 'EXPIRED' | 'FAILED';
+  status: 'PENDING' | 'PAID' | 'EXPIRED' | 'FAILED' | 'REFUND_PENDING' | 'REFUNDED';
   transactionId: string;
   idempotencyKey?: string;
   createdAt: string;
@@ -253,7 +253,7 @@ export function createOrder(
   );
 }
 
-/** PATCH /orders/:id/status — chuyển trạng thái (chủ đơn hoặc ADMIN). */
+/** PATCH /orders/:id/status — ADMIN cập nhật tiến độ; khách hủy đơn chưa trả tiền. */
 export function updateOrderStatus(
   id: string | number,
   status: OrderStatus,

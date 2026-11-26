@@ -302,7 +302,7 @@ Quy ước cột **Xác thực**:
 | POST | `/orders` | JWT | Đặt đơn: server tự tra bảng giá tính tiền và xác nhận lại voucher; dữ liệu sai → 400 |
 | GET | `/orders/me` | JWT | Lịch sử đơn của chính mình, mới nhất trước |
 | GET | `/orders/:id` | JWT (chủ đơn hoặc ADMIN) | Chi tiết một đơn; người khác xem → 403, không có đơn → 404 |
-| PATCH | `/orders/:id/status` | JWT (chủ đơn hoặc ADMIN) | Chuyển trạng thái đơn theo luồng hợp lệ; sai bước chuyển → 400 |
+| PATCH | `/orders/:id/status` | JWT | Khách chỉ hủy đơn chưa thanh toán của mình. ADMIN cập nhật tiến độ hoặc hủy đơn đã thanh toán trước khi pha chế. Trạng thái thanh toán do hệ thống xử lý. |
 
 ### Thanh toán
 
@@ -312,7 +312,11 @@ Quy ước cột **Xác thực**:
 | POST | `/payments/sepay/checkout` | JWT (chủ đơn) | Mở hoặc lấy lại phiên SePay của đơn (QR chuyển khoản, hạn 2 phút); hết hạn → `EXPIRED`, `restart: true` để mở phiên mới; đơn không còn chờ thanh toán → 409 |
 | POST | `/payments/sepay/simulate` | JWT (chủ đơn) | Giả lập "tiền đã vào" cho demo local; tự chặn khi `NODE_ENV=production` |
 | GET | `/payments/loyalty` | JWT | Điểm tích lũy của user đang đăng nhập |
+| GET | `/payments/refunds` | JWT + ADMIN | Liệt kê tối đa 100 khoản SePay đang chờ hoàn, từ cũ đến mới |
+| PATCH | `/payments/:id/refund` | JWT + ADMIN | Ghi nhận đã hoàn SePay sau khi đối soát, body `{ "reference": "mã giao dịch ngân hàng" }` |
 | POST | `/payments/sepay/webhook` | Webhook (khóa API SePay) | Webhook SePay báo tiền vào: đối soát mã + số tiền → đơn `PAID`, trừ kho trong transaction |
+
+Khi hủy đơn đã thanh toán, hệ thống hoàn tồn món, ly và nguyên liệu theo số lượng ghi lúc thanh toán, đồng thời thu hồi điểm của đơn. Ví/thẻ mô phỏng ghi `REFUNDED` ngay. Với SePay, nhân viên hoàn tiền qua ngân hàng, đối soát mã giao dịch rồi mới xác nhận qua API. Khoản thanh toán cũ thiếu số lượng ly/nguyên liệu ghi nhận lúc trừ kho cần đối soát kho thủ công (`inventoryReconciliationRequired` trong `Payment.result`).
 
 ### Khuyến mãi & tồn kho
 

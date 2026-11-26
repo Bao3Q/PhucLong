@@ -139,21 +139,21 @@ describe('OrdersService (nhánh in-memory, không cần DB)', () => {
     it('chặn bước bị bỏ qua và đi được hết luồng chính', async () => {
       const order = await service.createOrder(user, { items: [item] });
       await expect(
-        service.updateOrderStatus(user, order.id, OrderStatus.READY),
+        service.updateOrderStatus({ ...user, role: 'ADMIN' }, order.id, OrderStatus.READY),
       ).rejects.toThrow(BadRequestException);
+      await service.updateStatus(order.id, OrderStatus.PAID);
       for (const status of [
-        OrderStatus.PAID,
         OrderStatus.PREPARING,
         OrderStatus.READY,
         OrderStatus.COMPLETED,
       ]) {
         expect(
-          (await service.updateOrderStatus(user, order.id, status)).status,
+          (await service.updateOrderStatus({ ...user, role: 'ADMIN' }, order.id, status)).status,
         ).toBe(status);
       }
       // COMPLETED là trạng thái kết thúc
       await expect(
-        service.updateOrderStatus(user, order.id, OrderStatus.CANCELLED),
+        service.updateOrderStatus({ ...user, role: 'ADMIN' }, order.id, OrderStatus.CANCELLED),
       ).rejects.toThrow(BadRequestException);
     });
 

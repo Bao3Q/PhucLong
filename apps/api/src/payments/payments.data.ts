@@ -1,4 +1,4 @@
-export type PaymentStatus = 'PENDING' | 'PAID' | 'EXPIRED' | 'FAILED';
+export type PaymentStatus = 'PENDING' | 'PAID' | 'EXPIRED' | 'FAILED' | 'REFUND_PENDING' | 'REFUNDED';
 
 /** Phiên thanh toán SePay (QR chuyển khoản) trả về cho frontend. */
 export interface SePayCheckout {

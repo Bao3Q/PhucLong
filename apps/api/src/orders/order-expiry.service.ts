@@ -1,6 +1,7 @@
 import {
   Inject,
   Injectable,
+  Logger,
   OnApplicationBootstrap,
   OnApplicationShutdown,
   Optional,
@@ -29,6 +30,7 @@ export class OrderExpiryService
   private static readonly INTERVAL_MS = 60_000;
   private static readonly BATCH_SIZE = 20;
 
+  private readonly logger = new Logger(OrderExpiryService.name);
   private timer?: ReturnType<typeof setInterval>;
 
   constructor(
@@ -74,22 +76,9 @@ export class OrderExpiryService
 
     for (const { id } of staleOrders) {
       try {
-        // Đi qua luồng chuẩn: assertTransition + CAS + hoàn stock + version++.
-        await this.ordersService.updateStatus(id, OrderStatus.CANCELLED);
-
-        // Các phiên SePay đang chờ của đơn tự hủy → EXPIRED (kèm lý do).
-        await this.prisma.payment.updateMany({
-          where: { orderId: id, status: 'PENDING' },
-          data: {
-            status: 'EXPIRED',
-            result: {
-              status: 'EXPIRED',
-              reason: 'Đơn hàng tự hủy do hết thời gian chờ thanh toán',
-            },
-          },
-        });
+        await this.ordersService.cancelExpiredOrder(id, cutoff);
       } catch {
-        // Đơn vừa bị luồng khác xử lý (CAS thất bại) — lần quét sau sẽ hết.
+        this.logger.error(`Không thể tự hủy đơn #${id}; sẽ thử lại ở lần quét sau`);
       }
     }
   }

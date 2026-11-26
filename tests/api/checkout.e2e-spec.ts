@@ -4,6 +4,7 @@
  * Mã test khớp docs/traceability-matrix.md (INT-T01 … INT-T08).
  */
 import { INestApplication } from '@nestjs/common';
+import { OrdersService } from '../../apps/api/src/orders/orders.service';
 import { PrismaService } from '../../apps/api/src/prisma/prisma.service';
 import { ONE_CAPPUCCINO, PASSWORD, bearer, createApp, loginAdmin, registerAndLogin, request, uniqueEmail } from './helpers';
 
@@ -221,5 +222,197 @@ describe('API tạo đơn và thanh toán (integration, PostgreSQL thật)', () 
     expect((await checkout(true).expect(201)).body.status).toBe('PENDING');
     await webhook({ transferAmount: order.total }).expect(200);
     expect(await orderStatus(tokenA, order.id)).toBe('PAID');
+  });
+
+  it('INT-T09 hủy đơn đã trả tiền hoàn kho và trừ điểm đúng một lần', async () => {
+    const db = app.get(PrismaService);
+    const productId = ONE_CAPPUCCINO.items[0].productId;
+    const recipes = await db.recipeItem.findMany({
+      where: { productId, size: 'S' },
+      include: { ingredient: true },
+    });
+    expect(recipes.length).toBeGreaterThan(0);
+    const stock = async () => (await db.product.findUniqueOrThrow({ where: { id: productId } })).stock;
+    const points = async () =>
+      (await request(http).get('/payments/loyalty').set(bearer(tokenA)).expect(200)).body.loyaltyPoints;
+    const original = { stock: await stock(), cups: await cupsS(), points: await points() };
+    const order = await createOrder(tokenA);
+    await request(http).post('/payments').set(bearer(tokenA))
+      .set('Idempotency-Key', `it-refund-${order.id}`)
+      .send({ orderId: order.id, method: 'card' }).expect(201);
+    expect(await points()).toBe(original.points + Math.floor(order.total / 10000));
+
+    const cancel = () => request(http).patch(`/orders/${order.id}/status`)
+      .set(bearer(tokenAdmin)).send({ status: 'CANCELLED' });
+    await request(http).patch(`/orders/${order.id}/status`)
+      .set(bearer(tokenA)).send({ status: 'CANCELLED' }).expect(403);
+    const [recipe] = recipes;
+    await db.recipeItem.update({ where: { id: recipe.id }, data: { amount: recipe.amount.mul(2) } });
+    const attempts = await Promise.all([cancel(), cancel()]).finally(() =>
+      db.recipeItem.update({ where: { id: recipe.id }, data: { amount: recipe.amount } }),
+    );
+    expect(attempts.filter((response) => response.status === 200)).toHaveLength(1);
+    expect(await orderStatus(tokenA, order.id)).toBe('CANCELLED');
+    expect({ stock: await stock(), cups: await cupsS(), points: await points() }).toEqual(original);
+    for (const { ingredient } of recipes) {
+      const restored = await db.ingredient.findUniqueOrThrow({ where: { id: ingredient.id } });
+      expect(restored.quantity.toString()).toBe(ingredient.quantity.toString());
+    }
+    expect(await db.loyaltyTransaction.findMany({
+      where: { orderId: order.id, type: 'ADJUST' },
+      select: { points: true, balanceAfter: true },
+    })).toEqual([{ points: -Math.floor(order.total / 10000), balanceAfter: original.points }]);
+    expect(await db.payment.findFirst({ where: { orderId: order.id } }))
+      .toMatchObject({ status: 'REFUNDED', success: true });
+  });
+
+  it('INT-T10 hủy đơn chưa trả tiền đóng phiên QR và giữ nguyên điểm', async () => {
+    const order = await createOrder(tokenA);
+    await sepay(tokenA, order.id).checkout().expect(201);
+    const db = app.get(PrismaService);
+    await request(http).patch(`/orders/${order.id}/status`)
+      .set(bearer(tokenA)).send({ status: 'CANCELLED' }).expect(200);
+    expect(await db.payment.findFirst({ where: { orderId: order.id } }))
+      .toMatchObject({ status: 'EXPIRED', success: false });
+    expect(await db.loyaltyTransaction.count({ where: { orderId: order.id } })).toBe(0);
+  });
+
+  it('INT-T11 hủy đơn SePay đã trả tiền tạo trạng thái chờ hoàn tiền', async () => {
+    const order = await createOrder(tokenA);
+    const { checkout, webhook } = sepay(tokenA, order.id);
+    await checkout().expect(201);
+    await webhook({ transferAmount: order.total }).expect(200);
+    await request(http).patch(`/orders/${order.id}/status`)
+      .set(bearer(tokenAdmin)).send({ status: 'CANCELLED' }).expect(200);
+    const payment = await app.get(PrismaService).payment.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(payment).toMatchObject({ status: 'REFUND_PENDING', success: true });
+    const queue = () => request(http).get('/payments/refunds').set(bearer(tokenAdmin)).expect(200);
+    expect((await queue()).body).toContainEqual(expect.objectContaining({ id: payment.id }));
+    await request(http).get('/payments/refunds').set(bearer(tokenA)).expect(403);
+
+    const confirm = (reference: string) => request(http).patch(`/payments/${payment.id}/refund`)
+      .set(bearer(tokenAdmin)).send({ reference });
+    const reference = `BANK-REFUND-${order.id}`;
+    await request(http).patch(`/payments/${payment.id}/refund`)
+      .set(bearer(tokenA)).send({ reference }).expect(403);
+    await confirm(reference).expect(200, { id: payment.id, status: 'REFUNDED', reference });
+    await confirm(reference).expect(200);
+    await confirm('OTHER-REFERENCE').expect(409);
+    expect((await queue()).body).not.toContainEqual(expect.objectContaining({ id: payment.id }));
+  });
+
+  it('INT-T12 tự hủy chỉ đóng QR quá hạn và giữ đơn có QR còn hiệu lực', async () => {
+    const db = app.get(PrismaService);
+    const order = await createOrder(tokenA);
+    const cutoff = new Date(Date.now() - 60000);
+    await db.order.update({
+      where: { id: order.id },
+      data: { createdAt: new Date(cutoff.getTime() - 60000) },
+    });
+    await sepay(tokenA, order.id).checkout().expect(201);
+    const orders = app.get(OrdersService);
+    await orders.cancelExpiredOrder(order.id, cutoff);
+    expect(await orderStatus(tokenA, order.id)).toBe('PENDING');
+    await db.payment.updateMany({
+      where: { orderId: order.id },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+    await orders.cancelExpiredOrder(order.id, cutoff);
+    expect(await orderStatus(tokenA, order.id)).toBe('CANCELLED');
+    expect(await db.payment.findFirst({ where: { orderId: order.id } }))
+      .toMatchObject({ status: 'EXPIRED' });
+  });
+
+  it('INT-T13 chỉ một đơn giữ được lượt voucher cuối', async () => {
+    const db = app.get(PrismaService);
+    const { code } = await db.promotion.create({
+      data: {
+        code: `INT-LAST-${Date.now()}`,
+        name: 'Voucher test',
+        discountType: 'FIXED',
+        discountValue: 1000,
+        usageLimit: 1,
+      },
+    });
+    const checkout = (productId: string) => request(http).post('/orders').set(bearer(tokenA))
+      .send({ items: [{ productId, size: 'S', qty: 1 }], voucherCode: code });
+    const results = await Promise.all([checkout('1'), checkout('2')]);
+    expect(results.map(({ status }) => status).sort()).toEqual([201, 400]);
+    expect(await db.promotion.findUnique({ where: { code } })).toMatchObject({ usedCount: 1 });
+    expect(await db.order.count({ where: { voucherCode: code } })).toBe(1);
+  });
+
+  it('INT-T14 endpoint thanh toán từ chối dữ liệu sai kiểu', async () => {
+    const order = await createOrder(tokenA);
+    await request(http).post('/payments').set(bearer(tokenA))
+      .send({ orderId: order.id, method: 42 }).expect(400);
+    await request(http).post('/payments').set(bearer(tokenA))
+      .send({ orderId: 'invalid', method: 'card' }).expect(400);
+    expect(await orderStatus(tokenA, order.id)).toBe('PENDING');
+  });
+
+  it('INT-T15 hết ly rollback trạng thái thanh toán và mọi thay đổi liên quan', async () => {
+    const db = app.get(PrismaService);
+    const order = await createOrder(tokenA);
+    const cup = await db.cup.findUniqueOrThrow({ where: { size: 'S' } });
+    await db.cup.update({ where: { size: 'S' }, data: { quantity: 0 } });
+    try {
+      await request(http).post('/payments').set(bearer(tokenA))
+        .send({ orderId: order.id, method: 'card' }).expect(400);
+      expect(await orderStatus(tokenA, order.id)).toBe('PENDING');
+      expect(await db.payment.count({ where: { orderId: order.id } })).toBe(0);
+      expect(await db.loyaltyTransaction.count({ where: { orderId: order.id } })).toBe(0);
+    } finally {
+      await db.cup.update({ where: { size: 'S' }, data: { quantity: cup.quantity } });
+    }
+  });
+
+  it('INT-T16 hủy thanh toán cũ thiếu dữ liệu kho tạo cờ đối soát', async () => {
+    const db = app.get(PrismaService);
+    const order = await createOrder(tokenA);
+    const cupsBefore = await cupsS();
+    const paid = await request(http).post('/payments').set(bearer(tokenA))
+      .send({ orderId: order.id, method: 'card' }).expect(201);
+    await db.payment.update({
+      where: { id: paid.body.id },
+      data: { result: { transactionId: paid.body.transactionId, status: 'SUCCEEDED' } },
+    });
+    await request(http).patch(`/orders/${order.id}/status`)
+      .set(bearer(tokenAdmin)).send({ status: 'CANCELLED' }).expect(200);
+    expect(await cupsS()).toBe(cupsBefore - 1);
+    expect(await db.payment.findUnique({ where: { id: paid.body.id } }))
+      .toMatchObject({ status: 'REFUNDED', result: { inventoryReconciliationRequired: true } });
+  });
+
+  it('INT-T17 chỉ luồng thanh toán ghi PAID; ADMIN cập nhật tiến độ sau khi trả tiền', async () => {
+    const order = await createOrder(tokenA);
+    const update = (token: string, status: string) => request(http).patch(`/orders/${order.id}/status`)
+      .set(bearer(token)).send({ status });
+    await update(tokenA, 'PAID').expect(403);
+    await update(tokenAdmin, 'PAID').expect(403);
+    await update(tokenB, 'CANCELLED').expect(403);
+    expect(await orderStatus(tokenA, order.id)).toBe('PENDING');
+
+    await request(http).post('/payments').set(bearer(tokenA))
+      .send({ orderId: order.id, method: 'card' }).expect(201);
+    await update(tokenA, 'PREPARING').expect(403);
+    await update(tokenAdmin, 'READY').expect(400);
+    await update(tokenAdmin, 'PREPARING').expect(200);
+    await update(tokenAdmin, 'CANCELLED').expect(400);
+    await update(tokenAdmin, 'READY').expect(200);
+    await update(tokenAdmin, 'COMPLETED').expect(200);
+  });
+
+  it('INT-T18 hai lần thanh toán cùng khóa chỉ trừ kho và cộng điểm một lần', async () => {
+    const db = app.get(PrismaService);
+    const order = await createOrder(tokenA);
+    const cupsBefore = await cupsS();
+    const send = () => request(http).post('/payments').set(bearer(tokenA))
+      .set('Idempotency-Key', `concurrent-${order.id}`)
+      .send({ orderId: order.id, method: 'card' });
+    const [first, second] = await Promise.all([send().expect(201), send().expect(201)]);
+    expect(first.body.id).toBe(second.body.id);
+    expect(await cupsS()).toBe(cupsBefore - 1);
+    expect(await db.loyaltyTransaction.count({ where: { orderId: order.id, type: 'EARN' } })).toBe(1);
   });
 });

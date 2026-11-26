@@ -100,6 +100,7 @@ export class SepayService {
     orderId: number,
     restart: boolean,
   ) {
+    await this.ordersService.lockOrder(tx, orderId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order || order.userId !== userId) {
       throw new NotFoundException(`Không tìm thấy đơn hàng #${orderId}`);
@@ -244,22 +245,33 @@ export class SepayService {
     // Claim + trừ kho + đơn PAID + cộng điểm trong một transaction: thiếu nguyên
     // liệu/ly hay đơn vừa đổi trạng thái thì rollback cả claim, phiên vẫn chờ.
     return this.prisma.$transaction(async (tx) => {
+      await this.ordersService.lockOrder(tx, orderId);
       // Update có điều kiện: hai webhook trùng chạy song song thì chỉ một bên claim được.
       const claim = await tx.payment.updateMany({
-        where: { id: payment.id, success: false },
+        where: {
+          id: payment.id,
+          success: false,
+          status: 'PENDING',
+          expiresAt: { gt: new Date() },
+        },
         data: { success: true, status: 'PAID', paidAt: new Date() },
       });
       if (claim.count === 0) {
         const winner = await tx.payment.findUnique({ where: { id: payment.id } });
-        return this.alreadyPaid(winner?.result, event.id);
+        if (!winner?.success) {
+          throw new ConflictException('Phiên thanh toán SePay đã đóng hoặc hết hạn');
+        }
+        return this.alreadyPaid(winner.result, event.id);
       }
 
-      const { earnedPoints, totalPoints } = await this.paymentsService.fulfillOrder(tx, order);
+      const { earnedPoints, totalPoints, inventoryDebits } =
+        await this.paymentsService.fulfillOrder(tx, order);
       const result: Prisma.InputJsonObject = {
         success: true,
         orderId,
         status: OrderStatus.PAID,
         message: 'Thanh toán SePay thành công',
+        inventoryDebits,
         earnedLoyaltyPoints: earnedPoints,
         totalLoyaltyPoints: totalPoints,
         sepayTransactionId: event.id,

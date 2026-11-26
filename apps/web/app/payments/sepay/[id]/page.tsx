@@ -57,7 +57,50 @@ function SePayPaymentContent() {
       setPhase('error');
     };
 
-    async function run() {
+    let deadline: number;
+    let ticks = 0;
+
+    async function checkPayment(secondsRemaining: number): Promise<boolean> {
+      const latest = await fetchOrder(id);
+      if (cancelled) return false;
+      if (latest.ok && latest.data.status === 'PAID') {
+        setPhase('paid');
+        return false;
+      }
+      if (secondsRemaining !== 0) return true;
+
+      // Hết giờ trên trình duyệt: hỏi backend trước khi chốt hết hạn.
+      const closed = await createSePayCheckout(orderId);
+      if (cancelled) return false;
+      if (!closed.ok) {
+        fail(closed);
+        return false;
+      }
+      if (closed.data.status === 'EXPIRED') {
+        setCheckout(closed.data);
+        setPhase('expired');
+        return false;
+      }
+
+      deadline = Date.parse(closed.data.expiresAt); // Đồng hồ lệch: server vẫn còn hạn.
+      return true;
+    }
+
+    async function tick() {
+      if (cancelled) return;
+      const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      setSecondsLeft(left);
+
+      if (left === 0 || ticks % POLL_EVERY_TICKS === 0) {
+        const keepPolling = await checkPayment(left);
+        if (!keepPolling || cancelled) return;
+      }
+
+      ticks += 1;
+      timer = setTimeout(tick, 1000);
+    }
+
+    async function openPaymentSession() {
       const order = await fetchOrder(id);
       if (cancelled) return;
       if (!order.ok) return fail(order);
@@ -76,40 +119,11 @@ function SePayPaymentContent() {
       }
       setError(null);
       setPhase('waiting');
-
-      let deadline = Date.parse(first.data.expiresAt);
-      let ticks = 0;
-      const tick = async () => {
-        if (cancelled) return;
-        const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-        setSecondsLeft(left);
-
-        if (left === 0 || ticks % POLL_EVERY_TICKS === 0) {
-          const latest = await fetchOrder(id);
-          if (cancelled) return;
-          if (latest.ok && latest.data.status === 'PAID') {
-            setPhase('paid');
-            return;
-          }
-          if (left === 0) {
-            // Hết giờ: để backend chốt kết quả (EXPIRED, đơn PAYMENT_FAILED).
-            const closed = await createSePayCheckout(orderId);
-            if (cancelled) return;
-            if (!closed.ok) return fail(closed);
-            if (closed.data.status === 'EXPIRED') {
-              setCheckout(closed.data);
-              setPhase('expired');
-              return;
-            }
-            deadline = Date.parse(closed.data.expiresAt); // đồng hồ lệch: server vẫn còn hạn
-          }
-        }
-        ticks += 1;
-        timer = setTimeout(tick, 1000);
-      };
+      deadline = Date.parse(first.data.expiresAt);
       void tick();
     }
-    void run();
+
+    void openPaymentSession();
 
     return () => {
       cancelled = true;
