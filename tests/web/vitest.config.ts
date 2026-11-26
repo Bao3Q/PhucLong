@@ -16,6 +16,7 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^@\//, replacement: `${webDir}/` },
+      { find: /^next\/navigation$/, replacement: path.join(here, 'mocks/next-navigation.ts') },
       own('react'),
       own('react/jsx-runtime'),
       own('react/jsx-dev-runtime'),

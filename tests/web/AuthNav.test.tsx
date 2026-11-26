@@ -1,10 +1,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, it } from 'vitest';
 import AuthNav from '@/components/AuthNav';
 import { setToken } from '@/lib/auth';
 import { CartProvider, useCart } from '@/lib/cart';
-
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 function CartCount() {
   const { cart } = useCart();
@@ -39,4 +37,3 @@ it('xóa giỏ hiện tại và giỏ đã lưu khi bấm Đăng xuất', () => 
   render(<CartProvider><CartCount /></CartProvider>);
   expect(screen.getByText('0 món')).toBeTruthy();
 });
-
