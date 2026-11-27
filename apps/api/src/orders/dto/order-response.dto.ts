@@ -21,6 +21,9 @@ export interface OrderResponseDto {
   subtotal?: number;
   discountAmount?: number;
   voucherCode?: string;
+  voucherDiscountAmount?: number;
+  loyaltyDiscountAmount?: number;
+  loyaltyPointsRedeemed?: number;
   total: number;
   itemCount: number;
   createdAt: string;
@@ -36,6 +39,9 @@ export function toOrderResponse(order: Order): OrderResponseDto {
     subtotal: order.subtotal ?? order.total,
     discountAmount: order.discountAmount ?? 0,
     voucherCode: order.voucherCode,
+    voucherDiscountAmount: order.voucherDiscountAmount ?? 0,
+    loyaltyDiscountAmount: order.loyaltyDiscountAmount ?? 0,
+    loyaltyPointsRedeemed: order.loyaltyPointsRedeemed ?? 0,
     total: order.total,
     itemCount: order.items.reduce((sum, i) => sum + i.qty, 0),
     createdAt: order.createdAt.toISOString(),

@@ -1,6 +1,8 @@
 import { BadRequestException, Inject, Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreatePromotionDto } from './dto/create-promotion.dto';
+import { UpdatePromotionDto } from './dto/update-promotion.dto';
 
 /** Row Promotion rút gọn cho việc tính giảm giá. */
 export interface PromotionView {
@@ -107,5 +109,135 @@ export class PromotionsService {
   /** Endpoint POST /promotions/validate — chỉ xem trước, không tiêu lượt dùng. */
   async validate(code: string, subtotal: number): Promise<PromotionResult> {
     return this.validatePromotion(code, subtotal);
+  }
+
+  // Lấy danh sách voucher còn hiệu lực
+  async listAvailable() {
+    if (!this.prisma) return [];
+
+    const now = new Date();
+
+    const promotions = await this.prisma.promotion.findMany({
+      where: {
+        isActive: true,
+        startsAt: { lte: now },
+        OR: [
+          { endsAt: null },
+          { endsAt: { gte: now } },
+        ],
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    return promotions.filter(
+      (item) =>
+        item.usageLimit === null ||
+        item.usedCount < item.usageLimit
+    );
+  }
+
+  // Admin xem toàn bộ voucher
+  async listForAdmin() {
+    if (!this.prisma) return [];
+
+    return this.prisma.promotion.findMany({
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
+
+  // Thêm voucher
+  async createPromotion(dto: CreatePromotionDto) {
+    if (!this.prisma) {
+      throw new BadRequestException('Database chưa kết nối');
+    }
+
+    const code = dto.code.trim().toUpperCase();
+
+    if (
+      dto.discountType === 'PERCENT' &&
+      dto.discountValue > 100
+    ) {
+      throw new BadRequestException(
+        'Phần trăm giảm giá không được vượt quá 100%'
+      );
+    }
+
+    if (
+      dto.endsAt &&
+      new Date(dto.endsAt) < new Date(dto.startsAt)
+    ) {
+      throw new BadRequestException(
+        'Ngày kết thúc phải sau ngày bắt đầu'
+      );
+    }
+
+    return this.prisma.promotion.create({
+      data: {
+        ...dto,
+        code,
+        startsAt: new Date(dto.startsAt),
+        endsAt: dto.endsAt
+          ? new Date(dto.endsAt)
+          : null,
+      },
+    });
+  }
+
+  // Sửa voucher
+  async updatePromotion(id: number, dto: UpdatePromotionDto) {
+    if (!this.prisma) {
+      throw new BadRequestException('Database chưa kết nối');
+    }
+
+    const current = await this.prisma.promotion.findUnique({
+      where: { id },
+    });
+
+    if (!current) {
+      throw new BadRequestException('Voucher không tồn tại');
+    }
+
+    const discountType =
+      dto.discountType ?? current.discountType;
+
+    const discountValue =
+      dto.discountValue ?? current.discountValue;
+
+    if (
+      discountType === 'PERCENT' &&
+      discountValue > 100
+    ) {
+      throw new BadRequestException(
+        'Phần trăm giảm giá không được vượt quá 100%'
+      );
+    }
+
+    const startsAt = dto.startsAt
+      ? new Date(dto.startsAt)
+      : current.startsAt;
+
+    const endsAt = dto.endsAt !== undefined
+      ? (dto.endsAt ? new Date(dto.endsAt) : null)
+      : current.endsAt;
+
+    if (endsAt && endsAt < startsAt) {
+      throw new BadRequestException(
+        'Ngày kết thúc phải sau ngày bắt đầu'
+      );
+    }
+
+    return this.prisma.promotion.update({
+      where: { id },
+      data: {
+        ...dto,
+        code: dto.code?.trim().toUpperCase(),
+        startsAt,
+        endsAt,
+      },
+    });
   }
 }

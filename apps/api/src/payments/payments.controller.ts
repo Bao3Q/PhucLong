@@ -88,8 +88,51 @@ export class PaymentsController {
   }
 
   // Điểm thưởng tích lũy của user đang đăng nhập.
+  // Lấy số điểm hiện tại
   @Get('loyalty')
-  async getLoyaltyPoints(@Req() request: Request & { user: AuthUser }) {
-    return this.paymentsService.getLoyaltyPoints(request.user);
+  @UseGuards(JwtAuthGuard)
+  async getLoyaltyPoints(
+    @Req() request: Request & { user: AuthUser }
+  ) {
+    return this.paymentsService.getLoyaltyPoints(
+      request.user
+    );
+  }
+
+  // Lấy lịch sử giao dịch điểm
+  @Get('loyalty/history')
+  @UseGuards(JwtAuthGuard)
+  async getLoyaltyHistory(
+    @Req() request: Request & { user: AuthUser }
+  ) {
+    return this.paymentsService.getLoyaltyHistory(
+      request.user
+    );
+  }
+
+  // Admin xem điểm khách hàng
+  @Get('loyalty/admin/users')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  async listLoyaltyUsers() {
+    return this.paymentsService.listLoyaltyUsers();
+  }
+
+  // Admin điều chỉnh điểm
+  @Post('loyalty/admin/adjust')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  async adjustLoyalty(
+    @Body() dto: {
+      userId: string;
+      points: number;
+      description: string;
+    }
+  ) {
+    return this.paymentsService.adjustLoyaltyPoints(
+      dto.userId,
+      dto.points,
+      dto.description
+    );
   }
 }

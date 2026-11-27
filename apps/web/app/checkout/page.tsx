@@ -8,8 +8,10 @@ import {
   createSePayCheckout,
   payOrder,
   validateVoucher,
+  fetchLoyaltyPoints,
   type ApiResult,
   type VoucherValidation,
+  type LoyaltyPoints,
 } from '@/lib/api';
 import { cartTotal, toOrderItems, useCart } from '@/lib/cart';
 import { formatVnd } from '@/lib/orders';
@@ -42,12 +44,25 @@ export default function CheckoutPage() {
   const [voucher, setVoucher] = useState<VoucherValidation | null>(null);
   const [voucherError, setVoucherError] = useState<string | null>(null);
   const [validatingVoucher, setValidatingVoucher] = useState(false);
+  const [loyalty, setLoyalty] = useState<LoyaltyPoints | null>(null);
+  const [pointsInput, setPointsInput] = useState('0');
+  const [loyaltyError, setLoyaltyError] = useState<string | null>(null);
 
   // Giỏ đổi → subtotal đổi nên voucher đã áp không còn đúng.
   useEffect(() => {
     setVoucher(null);
     setVoucherError(null);
   }, [cart]);
+
+  useEffect(() => {
+    if (!getToken()) return;
+
+    fetchLoyaltyPoints().then((res) => {
+      if (res.ok) {
+        setLoyalty(res.data);
+      }
+    });
+  }, []);
 
   const applyVoucher = async () => {
     const code = voucherInput.trim();
@@ -80,8 +95,37 @@ export default function CheckoutPage() {
   );
 
   const totalCartPrice = cartTotal(cart);
-  const discountAmount = voucher?.discountAmount ?? 0;
-  const finalTotal = Math.max(0, totalCartPrice - discountAmount);
+
+  const discountAmount =
+    voucher?.discountAmount ?? 0;
+
+  const afterVoucher = Math.max(
+    0,
+    totalCartPrice - discountAmount
+  );
+
+  const requestedPoints = Math.max(
+    0,
+    Math.floor(Number(pointsInput) || 0)
+  );
+
+  const maxPoints = Math.floor(
+    afterVoucher * 0.2 / 1000
+  );
+
+  const pointsToRedeem = Math.min(
+    requestedPoints,
+    loyalty?.loyaltyPoints ?? 0,
+    maxPoints
+  );
+
+  const loyaltyDiscount =
+    pointsToRedeem * 1000;
+
+  const finalTotal = Math.max(
+    0,
+    afterVoucher - loyaltyDiscount
+  );
 
   const handleRemoveItem = (index: number) => {
     setCart((current) => current.filter((_, i) => i !== index));
@@ -123,7 +167,7 @@ export default function CheckoutPage() {
     try {
       // Client KHÔNG gửi giá: server tra bảng giá và tự tính unitPrice/total,
       // kèm voucherCode (nếu đã áp) để server xác nhận lần cuối.
-      const orderData = unwrap(await createOrder(toOrderItems(cart), voucher?.code));
+      const orderData = unwrap(await createOrder(toOrderItems(cart), voucher?.code,pointsToRedeem));
       if (!orderData) return;
 
       if (paymentMethod === 'sepay') {
@@ -260,6 +304,63 @@ export default function CheckoutPage() {
                   </p>
                 )}
               </div>
+              {/* Đổi điểm thưởng */}
+              <div className="space-y-3 rounded-2xl border border-[#006A32]/20 p-4">
+
+                <div>
+                  <h3 className="font-bold text-sm text-[#006A32]">
+                    Điểm thưởng Phúc Long
+                  </h3>
+
+                  <p className="text-xs text-gray-500 mt-1">
+                    Số điểm hiện có: {loyalty?.loyaltyPoints ?? 0} điểm
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={pointsInput}
+                    onChange={(e) => {
+                      setPointsInput(e.target.value);
+                      setLoyaltyError(null);
+                    }}
+                    placeholder="Nhập số điểm muốn đổi"
+                    className="flex-1 px-4 py-2.5 text-sm rounded-xl border border-gray-200"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPointsInput(String(maxPoints));
+                    }}
+                    className="px-4 rounded-xl bg-[#006A32] text-white text-xs font-bold"
+                  >
+                    Tối đa
+                  </button>
+                </div>
+
+                <p className="text-xs text-gray-500">
+                  10.000đ = 1 điểm tích lũy.
+                  1 điểm = 1.000đ giảm giá.
+                </p>
+
+                {loyaltyError && (
+                  <p className="text-xs text-red-600">
+                    {loyaltyError}
+                  </p>
+                )}
+
+                <div className="flex justify-between text-sm text-emerald-700">
+                  <span>Tiền giảm từ điểm</span>
+                  <strong>
+                    -{loyaltyDiscount.toLocaleString('vi-VN')}đ
+                  </strong>
+                </div>
+
+              </div>
 
               <div className="space-y-2">
                 <label className="text-xs font-bold uppercase text-gray-400 block">Phương thức thanh toán</label>
@@ -292,6 +393,12 @@ export default function CheckoutPage() {
                   <div className="flex justify-between text-emerald-700 font-semibold">
                     <span>Giảm giá ({voucher.code})</span>
                     <span>-{formatVnd(discountAmount)}</span>
+                  </div>
+                )}
+                {loyaltyDiscount > 0 && (
+                  <div className="flex justify-between text-emerald-700 font-semibold">
+                    <span>Đổi {pointsToRedeem} điểm</span>
+                    <span>-{loyaltyDiscount.toLocaleString('vi-VN')}đ</span>
                   </div>
                 )}
                 <div className="flex justify-between text-gray-500">

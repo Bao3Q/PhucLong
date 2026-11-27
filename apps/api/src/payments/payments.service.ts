@@ -314,4 +314,84 @@ export class PaymentsService {
       createdAt: payment.createdAt.toISOString(),
     };
   }
+  async getLoyaltyHistory(user: AuthUser) {
+    return this.prisma.loyaltyTransaction.findMany({
+      where: {
+        userId: user.id,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      select: {
+        id: true,
+        orderId: true,
+        type: true,
+        points: true,
+        balanceAfter: true,
+        description: true,
+        createdAt: true,
+      },
+    });
+  }
+  async adjustLoyaltyPoints(
+    userId: string,
+    points: number,
+    description: string,
+  ) {
+    if (!Number.isSafeInteger(points) || points === 0) {
+      throw new BadRequestException(
+        'Số điểm điều chỉnh không hợp lệ'
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.updateMany({
+        where: {
+          id: userId,
+          loyaltyPoints: {
+            gte: points < 0 ? -points : 0,
+          },
+        },
+        data: {
+          loyaltyPoints: {
+            increment: points,
+          },
+        },
+      });
+
+      if (updated.count !== 1) {
+        throw new BadRequestException(
+          'Không tìm thấy khách hàng hoặc số điểm không đủ'
+        );
+      }
+
+      const user = await tx.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { loyaltyPoints: true },
+      });
+
+      return tx.loyaltyTransaction.create({
+        data: {
+          userId,
+          type: 'ADJUST',
+          points,
+          balanceAfter: user.loyaltyPoints,
+          description,
+        },
+      });
+    });
+  }
+  async listLoyaltyUsers() {
+    return this.prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        loyaltyPoints: true,
+        createdAt: true,
+      },
+      orderBy: {
+        loyaltyPoints: 'desc',
+      },
+    });
+  }
 }

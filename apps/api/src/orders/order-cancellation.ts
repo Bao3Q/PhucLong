@@ -7,12 +7,39 @@ function asObject(value: Prisma.JsonValue | undefined): Prisma.JsonObject | unde
 
 export async function cancelOrderPayments(
   tx: Prisma.TransactionClient,
-  order: { id: number; userId: string; status: string },
+  order: { id: number; userId: string; status: string;loyaltyPointsRedeemed?: number; },
 ): Promise<void> {
   await tx.payment.updateMany({
     where: { orderId: order.id, status: 'PENDING' },
-    data: { status: 'EXPIRED', result: { status: 'EXPIRED', reason: 'Đơn hàng đã hủy' } },
+    data: { status: 'EXPIRED', result: { status: 'EXPIRED', reason: 'Đơn hàng đã hủy' } }, 
   });
+  // Hoàn lại điểm khách đã sử dụng khi tạo đơn
+  const redeemedPoints = order.loyaltyPointsRedeemed ?? 0;
+
+  if (redeemedPoints > 0) {
+    const user = await tx.user.update({
+      where: { id: order.userId },
+      data: {
+        loyaltyPoints: {
+          increment: redeemedPoints,
+        },
+      },
+      select: {
+        loyaltyPoints: true,
+      },
+    });
+
+    await tx.loyaltyTransaction.create({
+      data: {
+        userId: order.userId,
+        orderId: order.id,
+        type: 'ADJUST',
+        points: redeemedPoints,
+        balanceAfter: user.loyaltyPoints,
+        description: `Hoàn ${redeemedPoints} điểm từ đơn #${order.id} đã hủy`,
+      },
+    });
+  }
 
   if (order.status !== OrderStatus.PAID) return;
 

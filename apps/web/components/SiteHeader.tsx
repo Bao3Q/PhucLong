@@ -1,9 +1,8 @@
+
 'use client';
 
 /**
- * Header thống nhất cho mọi trang (menu, checkout, login, lịch sử đơn).
- * Đọc giỏ hàng từ CartProvider (lib/cart.ts) nên số lượng/tổng tiền luôn realtime,
- * và trạng thái đăng nhập từ AuthNav (useSyncExternalStore).
+ * Header thống nhất cho mọi trang.
  */
 import Link from 'next/link';
 import AuthNav from './AuthNav';
@@ -18,18 +17,34 @@ export default function SiteHeader() {
   return (
     <header className="bg-white border-b border-stone-200/80 px-6 lg:px-12 py-4 flex justify-between items-center">
       <Link href="/" className="flex items-center space-x-2">
-        <span className="bg-[#006A32] text-white px-2.5 py-1 rounded-md font-bold text-sm">PL</span>
-        <span className="font-bold tracking-wider text-stone-900">PHÚC LONG</span>
+        <span className="bg-[#006A32] text-white px-2.5 py-1 rounded-md font-bold text-sm">
+          PL
+        </span>
+        <span className="font-bold tracking-wider text-stone-900">
+          PHÚC LONG
+        </span>
       </Link>
 
       <nav className="flex items-center gap-5 text-sm font-semibold">
         <Link href="/" className="text-stone-600 hover:text-[#006A32] transition">
           Menu
         </Link>
+
         <Link href="/orders" className="text-stone-600 hover:text-[#006A32] transition">
           Lịch sử đơn
         </Link>
+
+        {/* Voucher và điểm thưởng */}
+        <Link href="/vouchers" className="text-stone-600 hover:text-[#006A32] transition">
+          Ưu đãi
+        </Link>
+
+        <Link href="/rewards" className="text-stone-600 hover:text-[#006A32] transition">
+          Điểm thưởng
+        </Link>
+
         <AuthNav />
+
         <Link
           href="/checkout"
           className="flex items-center gap-2 bg-[#006A32] text-white rounded-full pl-3 pr-1.5 py-1.5 hover:bg-[#005227] transition"
@@ -38,13 +53,18 @@ export default function SiteHeader() {
           <span className="text-xs font-bold">🛒 Giỏ hàng</span>
           <span
             className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-bold ${
-              count > 0 ? 'bg-white text-[#006A32]' : 'bg-white/25 text-white/90'
+              count > 0
+                ? 'bg-white text-[#006A32]'
+                : 'bg-white/25 text-white/90'
             }`}
           >
             {count}
           </span>
+
           {count > 0 && (
-            <span className="hidden md:inline text-xs font-bold pr-1">{formatVnd(total)}</span>
+            <span className="hidden md:inline text-xs font-bold pr-1">
+              {formatVnd(total)}
+            </span>
           )}
         </Link>
       </nav>

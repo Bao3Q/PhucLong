@@ -35,6 +35,7 @@ type NewOrder = {
   items: Omit<OrderItem, 'id' | 'orderId'>[];
   subtotal: number;
   voucherCode?: string;
+  loyaltyPointsToRedeem?: number;
 };
 
 @Injectable()
@@ -95,6 +96,7 @@ export class OrdersService {
       items: pricedItems,
       subtotal,
       voucherCode: createOrderDto.voucherCode?.trim().toUpperCase() || undefined,
+      loyaltyPointsToRedeem:createOrderDto.loyaltyPointsToRedeem ?? 0,
     };
 
     const order = this.prisma
@@ -160,17 +162,102 @@ export class OrdersService {
   ): Promise<Order> {
     const quantities = this.aggregateQuantities(draft.items);
     const createdOrderId = await prisma.$transaction(async (tx) => {
-      // Kiểm tra voucher trong transaction, trước khi giữ tồn kho.
-      const { discountAmount, appliedVoucher, total } =
-        await this.priceWithVoucher(draft, tx);
-      await this.reserveDatabaseStock(tx, quantities);
+      // Kiểm tra voucher và điểm trong transaction, trước khi giữ tồn kho.
+      // 1. Tính giảm giá voucher
+    const {
+      discountAmount,
+      appliedVoucher,
+      total: totalAfterVoucher,
+    } = await this.priceWithVoucher(draft, tx);
 
+    // 2. Lấy số điểm khách muốn đổi
+    const pointsToRedeem = draft.loyaltyPointsToRedeem ?? 0;
+
+    if (!Number.isSafeInteger(pointsToRedeem) || pointsToRedeem < 0) {
+      throw new BadRequestException('Số điểm đổi không hợp lệ');
+    }
+
+    let loyaltyDiscountAmount = 0;
+    let balanceAfter = 0;
+
+    if (pointsToRedeem > 0) {
+
+      // Chỉ cho đổi tối đa 20% giá trị đơn sau voucher
+      const maxPoints = Math.floor(
+        totalAfterVoucher * 0.2 / 1000
+      );
+
+      if (pointsToRedeem > maxPoints) {
+        throw new BadRequestException(
+          `Bạn chỉ được sử dụng tối đa ${maxPoints} điểm cho đơn hàng này`
+        );
+      }
+
+      // Trừ điểm bằng updateMany để tránh hai yêu cầu cùng sử dụng
+      // một số dư điểm.
+      const updated = await tx.user.updateMany({
+        where: {
+          id: draft.userId,
+          loyaltyPoints: {
+            gte: pointsToRedeem,
+          },
+        },
+        data: {
+          loyaltyPoints: {
+            decrement: pointsToRedeem,
+          },
+        },
+      });
+
+      if (updated.count !== 1) {
+        throw new BadRequestException(
+          'Số điểm thưởng của bạn không đủ'
+        );
+      }
+
+      const user = await tx.user.findUniqueOrThrow({
+        where: { id: draft.userId },
+        select: { loyaltyPoints: true },
+      });
+
+      balanceAfter = user.loyaltyPoints;
+
+      // 1 điểm = 1.000đ
+      loyaltyDiscountAmount = pointsToRedeem * 1000;
+
+      // Ghi lịch sử đổi điểm
+      await tx.loyaltyTransaction.create({
+        data: {
+          userId: draft.userId,
+          type: 'REDEEM',
+          points: -pointsToRedeem,
+          balanceAfter,
+          description: 'Đổi điểm giảm giá đơn hàng',
+        },
+      });
+    }
+
+    // 3. Tính tổng tiền sau cả voucher và điểm
+    const total = Math.max(
+      0,
+      totalAfterVoucher - loyaltyDiscountAmount
+    );
+
+    // 4. Tiếp tục giữ tồn kho
+    await this.reserveDatabaseStock(tx, quantities);
       const created = await tx.order.create({
         data: {
           userId: draft.userId,
           status: OrderStatus.PENDING,
           subtotal: draft.subtotal,
-          discountAmount,
+
+          discountAmount:
+            discountAmount + loyaltyDiscountAmount,
+
+          voucherDiscountAmount: discountAmount,
+          loyaltyDiscountAmount,
+          loyaltyPointsRedeemed: pointsToRedeem,
+
           voucherCode: appliedVoucher ?? null,
           total,
           items: {

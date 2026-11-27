@@ -63,6 +63,9 @@ export interface Order {
   subtotal?: number;
   discountAmount?: number;
   voucherCode?: string;
+  voucherDiscountAmount?: number;
+  loyaltyDiscountAmount?: number;
+  loyaltyPointsRedeemed?: number;
   total: number;
   itemCount: number;
   createdAt: string;
@@ -109,6 +112,16 @@ export interface PaymentRecord {
 export interface LoyaltyPoints {
   userId: string;
   loyaltyPoints: number;
+}
+
+export interface LoyaltyTransaction {
+  id: number;
+  orderId: number | null;
+  type: 'EARN' | 'REDEEM' | 'ADJUST' | 'EXPIRE';
+  points: number;
+  balanceAfter: number;
+  description: string | null;
+  createdAt: string;
 }
 
 /** Kết quả POST /promotions/validate — xem trước giảm giá. */
@@ -246,10 +259,15 @@ export function fetchOrder(id: string | number): Promise<ApiResult<Order>> {
 export function createOrder(
   items: CreateOrderItem[],
   voucherCode?: string,
+  loyaltyPointsToRedeem = 0,
 ): Promise<ApiResult<Order>> {
   return request<Order>(
     '/orders',
-    jsonBody({ items, ...(voucherCode ? { voucherCode } : {}) }),
+    jsonBody({
+      items,
+      ...(voucherCode ? { voucherCode } : {}),
+      loyaltyPointsToRedeem,
+    }),
   );
 }
 
@@ -309,4 +327,11 @@ export function validateVoucher(
   return request<VoucherValidation>('/promotions/validate', {
     ...jsonBody({ code, subtotal }),
   });
+}
+//Thêm API lấy lịch sử điểm
+export function fetchLoyaltyHistory():
+  Promise<ApiResult<LoyaltyTransaction[]>> {
+  return request<LoyaltyTransaction[]>(
+    '/payments/loyalty/history'
+  );
 }

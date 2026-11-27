@@ -70,6 +70,9 @@ export interface Order {
   subtotal?: number;
   discountAmount?: number;
   voucherCode?: string;
+  voucherDiscountAmount?: number;
+  loyaltyDiscountAmount?: number;
+  loyaltyPointsRedeemed?: number;
   total: number;
   createdAt: Date;
   updatedAt: Date;
