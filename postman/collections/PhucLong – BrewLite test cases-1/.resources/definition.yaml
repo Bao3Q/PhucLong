@@ -1,0 +1,91 @@
+$kind: collection
+name: PhucLong – BrewLite test cases
+description: |-
+  Bộ test case backend cho repo Bao3Q/PhucLong, bám theo đề BrewLite (mục 12.1, Task 10, NFR).
+
+  Mỗi request là một test case: mã TC, yêu cầu liên quan, kỹ thuật thiết kế test, tiền điều kiện và kết quả mong đợi nằm trong phần mô tả (tab Docs).
+
+  Chạy cả collection theo thứ tự (Run collection). Đổi biến `baseUrl` trong tab Variables nếu chạy với server khác.
+variables:
+  - key: baseUrl
+    value: http://localhost:4000
+    disabled: false
+    secret: false
+  - key: adminEmail
+    value: admin@phuclong.vn
+    disabled: false
+    secret: false
+  - key: adminPassword
+    value: Admin@123456
+    disabled: false
+    secret: false
+  - key: maxResponseMs
+    value: "500"
+    disabled: false
+    secret: false
+  - key: bearer_token_14lb
+    secret: true
+    disabled: false
+  - key: price1
+    value: ""
+    disabled: false
+  - key: toppingName
+    value: ""
+    disabled: false
+  - key: toppingPrice
+    value: ""
+    disabled: false
+  - key: emailA
+    value: ""
+    disabled: false
+  - key: emailB
+    value: ""
+    disabled: false
+  - key: userIdA
+    value: ""
+    disabled: false
+  - key: userToken
+    value: ""
+    disabled: false
+  - key: userTokenB
+    value: ""
+    disabled: false
+  - key: adminToken
+    value: ""
+    disabled: false
+  - key: orderId
+    value: ""
+    disabled: false
+  - key: orderTotal
+    value: ""
+    disabled: false
+  - key: pendingOrderId
+    value: ""
+    disabled: false
+  - key: cancelOrderId
+    value: ""
+    disabled: false
+  - key: payKey
+    value: ""
+    disabled: false
+  - key: paymentId
+    value: ""
+    disabled: false
+  - key: cancelProductId
+    value: ""
+    disabled: false
+  - key: cancelQty
+    value: ""
+    disabled: false
+  - key: stockBefore
+    value: ""
+    disabled: false
+  - key: qaProductId
+    value: ""
+    disabled: false
+scripts:
+  - type: http:afterResponse
+    code: |-
+      const limit = Number(pm.variables.get('maxResponseMs') || 500);
+      pm.test('NFR: phản hồi < ' + limit + 'ms', () => pm.expect(pm.response.responseTime).to.be.below(limit));
+    language: text/javascript

@@ -1,0 +1,25 @@
+$kind: http-request
+description: |-
+  **PAY-T04** – User B thanh toán đơn của A → bị chặn
+
+  - **Yêu cầu:** FR-05, NFR bảo mật
+  - **Kỹ thuật:** Phân quyền (truy cập dữ liệu người khác)
+  - **Kết quả mong đợi:** 403
+url: "{{baseUrl}}/payments"
+method: POST
+headers:
+  Authorization: Bearer {{userTokenB}}
+  Idempotency-Key: qa-other-{{$timestamp}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "orderId": {{orderId}},
+      "method": "card"
+    }
+scripts:
+  - type: afterResponse
+    code: pm.test('Status 403', () => pm.response.to.have.status(403));
+    language: text/javascript
+order: 3000

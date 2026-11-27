@@ -1,0 +1,32 @@
+$kind: http-request
+name: PAY-T07 · Dùng lại key cho yêu cầu khác (đổi phương thức) → bị từ chối
+description: |-
+  **PAY-T07** – Dùng lại key cho yêu cầu khác (đổi phương thức) → bị từ chối
+
+  - **Yêu cầu:** Task 10.2
+  - **Kỹ thuật:** Kiểm thử idempotency (xung đột key)
+  - **Kết quả mong đợi:** 400
+url: "{{baseUrl}}/payments"
+method: POST
+headers:
+  Authorization: Bearer {{userToken}}
+  Idempotency-Key: "{{payKey}}"
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "orderId": {{orderId}},
+      "method": "momo"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 400', () => pm.response.to.have.status(400));
+      pm.test('Thông báo lỗi chứa "Idempotency-Key"', () => {
+        const m = pm.response.json().message;
+        const s = Array.isArray(m) ? m.join(' | ') : String(m);
+        pm.expect(s).to.include("Idempotency-Key");
+      });
+    language: text/javascript
+order: 6000

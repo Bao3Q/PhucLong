@@ -1,0 +1,3 @@
+$kind: collection
+description: Như trên. Ở PhucLong chỉ ADMIN cập nhật tiến độ; khách chỉ được huỷ đơn chưa thanh toán.
+order: 8000

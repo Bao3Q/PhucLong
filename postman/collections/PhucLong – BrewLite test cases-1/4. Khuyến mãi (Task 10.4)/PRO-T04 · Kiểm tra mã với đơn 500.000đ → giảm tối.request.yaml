@@ -1,0 +1,27 @@
+$kind: http-request
+name: PRO-T04 · Kiểm tra mã với đơn 500.000đ → giảm tối đa 20.000đ
+description: |-
+  **PRO-T04** – Kiểm tra mã với đơn 500.000đ → giảm tối đa 20.000đ
+
+  - **Yêu cầu:** Task 10.4
+  - **Kỹ thuật:** Giá trị biên (mức trần giảm giá)
+  - **Kết quả mong đợi:** 201, discount = 20.000
+url: "{{baseUrl}}/promotions/validate"
+method: POST
+headers:
+  Authorization: Bearer {{userToken}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "code": "WELCOME10",
+      "subtotal": 500000
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 201', () => pm.response.to.have.status(201));
+      pm.test('discount bị chặn ở 20000', () => pm.expect(pm.response.json().discountAmount).to.eql(20000));
+    language: text/javascript
+order: 4000

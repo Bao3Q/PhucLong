@@ -1,0 +1,27 @@
+$kind: http-request
+name: HIS-T02 · Lịch sử đơn của A → có các đơn vừa tạo, mới nhất trước
+description: |-
+  **HIS-T02** – Lịch sử đơn của A → có các đơn vừa tạo, mới nhất trước
+
+  - **Yêu cầu:** FR-06, Task 9
+  - **Kỹ thuật:** Happy path
+  - **Kết quả mong đợi:** 200, chứa đơn đã đặt, sắp xếp createdAt giảm dần
+url: "{{baseUrl}}/orders/me"
+method: GET
+headers:
+  Authorization: Bearer {{userToken}}
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      const list = pm.response.json();
+      pm.test('Chứa đơn đã thanh toán và đơn đang chờ', () => {
+        const ids = list.map((o) => o.id);
+        pm.expect(ids).to.include(Number(pm.collectionVariables.get('orderId')));
+        pm.expect(ids).to.include(Number(pm.collectionVariables.get('pendingOrderId')));
+      });
+      pm.test('Mới nhất trước', () => {
+        for (let i = 1; i < list.length; i++) pm.expect(new Date(list[i - 1].createdAt) >= new Date(list[i].createdAt)).to.be.true;
+      });
+    language: text/javascript
+order: 2000

@@ -1,0 +1,24 @@
+$kind: http-request
+description: |-
+  **API-T03** – Xem chi tiết sản phẩm id = 1
+
+  - **Yêu cầu:** FR-02
+  - **Kỹ thuật:** Happy path
+  - **Kết quả mong đợi:** 200, đúng sản phẩm id "1"
+url: "{{baseUrl}}/products/1"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      const p = pm.response.json();
+      pm.test('Đúng id "1"', () => pm.expect(p.id).to.eql('1'));
+      pm.collectionVariables.set('price1', p.basePrice);
+      pm.test('Có size S/M/L (+0/5k/10k) và topping', () => {
+        pm.expect(p.sizes.map((s) => s.price)).to.eql([0, 5000, 10000]);
+        pm.expect(p.toppings).to.be.an('array').that.is.not.empty;
+      });
+      pm.collectionVariables.set('toppingName', p.toppings[0].name);
+      pm.collectionVariables.set('toppingPrice', p.toppings[0].price);
+    language: text/javascript
+order: 3000

@@ -1,0 +1,14 @@
+$kind: http-request
+description: |-
+  **HIS-T05** – Xem lịch sử chưa đăng nhập → 401
+
+  - **Yêu cầu:** FR-06
+  - **Kỹ thuật:** Phân quyền
+  - **Kết quả mong đợi:** 401
+url: "{{baseUrl}}/orders/me"
+method: GET
+scripts:
+  - type: afterResponse
+    code: pm.test('Status 401', () => pm.response.to.have.status(401));
+    language: text/javascript
+order: 5000

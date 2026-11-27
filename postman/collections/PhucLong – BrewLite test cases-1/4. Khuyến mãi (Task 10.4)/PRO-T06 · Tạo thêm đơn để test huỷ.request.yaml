@@ -1,0 +1,31 @@
+$kind: http-request
+description: |-
+  **PRO-T06** – Tạo thêm đơn để test huỷ
+
+  - **Kỹ thuật:** Chuẩn bị dữ liệu
+  - **Kết quả mong đợi:** 201
+url: "{{baseUrl}}/orders"
+method: POST
+headers:
+  Authorization: Bearer {{userToken}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "items": [
+        {
+          "productId": "2",
+          "size": "S",
+          "toppings": [],
+          "qty": 2
+        }
+      ]
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 201', () => pm.response.to.have.status(201));
+      pm.collectionVariables.set('cancelOrderId', pm.response.json().id);
+    language: text/javascript
+order: 6000

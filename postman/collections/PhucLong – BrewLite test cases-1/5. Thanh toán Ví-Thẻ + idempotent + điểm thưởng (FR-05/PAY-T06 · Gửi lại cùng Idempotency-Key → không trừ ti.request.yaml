@@ -1,0 +1,29 @@
+$kind: http-request
+name: PAY-T06 · Gửi lại cùng Idempotency-Key → không trừ tiền lần 2
+description: |-
+  **PAY-T06** – Gửi lại cùng Idempotency-Key → không trừ tiền lần 2
+
+  - **Yêu cầu:** Task 10.2 (tiêu chí b)
+  - **Kỹ thuật:** Kiểm thử idempotency
+  - **Tiền điều kiện:** PAY-T05 đã thành công
+  - **Kết quả mong đợi:** 201, trả lại đúng payment cũ (cùng id)
+url: "{{baseUrl}}/payments"
+method: POST
+headers:
+  Authorization: Bearer {{userToken}}
+  Idempotency-Key: "{{payKey}}"
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "orderId": {{orderId}},
+      "method": "card"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 201', () => pm.response.to.have.status(201));
+      pm.test('Cùng payment id', () => pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('paymentId'))));
+    language: text/javascript
+order: 5000

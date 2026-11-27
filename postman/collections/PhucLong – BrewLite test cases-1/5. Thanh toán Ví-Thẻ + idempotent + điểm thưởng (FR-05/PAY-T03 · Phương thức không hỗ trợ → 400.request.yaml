@@ -1,0 +1,25 @@
+$kind: http-request
+description: |-
+  **PAY-T03** – Phương thức không hỗ trợ → 400
+
+  - **Yêu cầu:** FR-05
+  - **Kỹ thuật:** Phân vùng tương đương (vùng không hợp lệ)
+  - **Kết quả mong đợi:** 400
+url: "{{baseUrl}}/payments"
+method: POST
+headers:
+  Authorization: Bearer {{userToken}}
+  Idempotency-Key: qa-bad-{{$timestamp}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "orderId": {{orderId}},
+      "method": "cash"
+    }
+scripts:
+  - type: afterResponse
+    code: pm.test('Status 400', () => pm.response.to.have.status(400));
+    language: text/javascript
+order: 2000

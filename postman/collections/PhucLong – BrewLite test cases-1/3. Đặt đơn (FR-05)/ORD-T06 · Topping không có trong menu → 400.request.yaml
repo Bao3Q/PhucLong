@@ -1,0 +1,38 @@
+$kind: http-request
+description: |-
+  **ORD-T06** – Topping không có trong menu → 400
+
+  - **Yêu cầu:** FR-02, FR-05
+  - **Kỹ thuật:** Phân vùng tương đương (vùng không hợp lệ)
+  - **Kết quả mong đợi:** 400, báo topping không hợp lệ
+url: "{{baseUrl}}/orders"
+method: POST
+headers:
+  Authorization: Bearer {{userToken}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "items": [
+        {
+          "productId": "1",
+          "size": "M",
+          "toppings": [
+            "Phô mai"
+          ],
+          "qty": 1
+        }
+      ]
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 400', () => pm.response.to.have.status(400));
+      pm.test('Thông báo lỗi chứa "không hợp lệ"', () => {
+        const m = pm.response.json().message;
+        const s = Array.isArray(m) ? m.join(' | ') : String(m);
+        pm.expect(s).to.include("không hợp lệ");
+      });
+    language: text/javascript
+order: 6000

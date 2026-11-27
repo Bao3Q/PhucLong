@@ -1,0 +1,29 @@
+$kind: http-request
+description: |-
+  **AUTH-T03** – Đăng ký email sai định dạng → 400
+
+  - **Yêu cầu:** FR-04, NFR validate
+  - **Kỹ thuật:** Phân vùng tương đương (vùng không hợp lệ)
+  - **Kết quả mong đợi:** 400, báo lỗi email
+url: "{{baseUrl}}/auth/register"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "email": "khong-phai-email",
+      "password": "Passw0rd!"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 400', () => pm.response.to.have.status(400));
+      pm.test('Thông báo lỗi chứa "Email không hợp lệ"', () => {
+        const m = pm.response.json().message;
+        const s = Array.isArray(m) ? m.join(' | ') : String(m);
+        pm.expect(s).to.include("Email không hợp lệ");
+      });
+    language: text/javascript
+order: 3000

@@ -1,0 +1,29 @@
+$kind: http-request
+description: |-
+  **INV-T01** – ADMIN tạo sản phẩm test tồn kho = 3
+
+  - **Yêu cầu:** Task 10.3
+  - **Kỹ thuật:** Chuẩn bị dữ liệu
+  - **Kết quả mong đợi:** 201
+url: "{{baseUrl}}/products"
+method: POST
+headers:
+  Authorization: Bearer {{adminToken}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "name": "QA Concurrency",
+      "category": "QA Test",
+      "basePrice": 20000,
+      "image": "https://example.com/qa.jpg",
+      "stock": 3
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 201', () => pm.response.to.have.status(201));
+      pm.collectionVariables.set('qaProductId', pm.response.json().id);
+    language: text/javascript
+order: 1000

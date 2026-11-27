@@ -1,0 +1,29 @@
+$kind: http-request
+name: AUTH-T05 · Đăng ký mật khẩu đúng 8 ký tự (biên) + email viết hoa → 201, email chuẩn hoá
+description: |-
+  **AUTH-T05** – Đăng ký mật khẩu đúng 8 ký tự (biên) + email viết hoa → 201, email chuẩn hoá
+
+  - **Yêu cầu:** FR-04
+  - **Kỹ thuật:** Giá trị biên (min) + chuẩn hoá dữ liệu
+  - **Kết quả mong đợi:** 201, email được trim + chuyển chữ thường
+url: "{{baseUrl}}/auth/register"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "email": "{{rawEmailB}}",
+      "password": "Abcd123!"
+    }
+scripts:
+  - type: beforeRequest
+    code: pm.variables.set('rawEmailB', '  ' + pm.collectionVariables.get('emailB').toUpperCase() + '  ');
+    language: text/javascript
+  - type: afterResponse
+    code: |-
+      pm.test('Status 201', () => pm.response.to.have.status(201));
+      pm.test('Email lưu dạng chữ thường, không khoảng trắng', () => pm.expect(pm.response.json().email).to.eql(pm.collectionVariables.get('emailB')));
+    language: text/javascript
+order: 5000

@@ -1,0 +1,40 @@
+$kind: http-request
+name: PRO-T01 · Đặt đơn với mã welcome10 (viết thường) → giảm 10%
+description: |-
+  **PRO-T01** – Đặt đơn với mã welcome10 (viết thường) → giảm 10%
+
+  - **Yêu cầu:** Task 10.4
+  - **Kỹ thuật:** Happy path + chuẩn hoá mã
+  - **Kết quả mong đợi:** 201, voucherCode = WELCOME10, discount = min(10%, 20.000)
+url: "{{baseUrl}}/orders"
+method: POST
+headers:
+  Authorization: Bearer {{userToken}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "items": [
+        {
+          "productId": "2",
+          "size": "L",
+          "toppings": [],
+          "qty": 2
+        }
+      ],
+      "voucherCode": "welcome10"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 201', () => pm.response.to.have.status(201));
+      const o = pm.response.json();
+      pm.test('Giảm đúng', () => {
+        pm.expect(o.voucherCode).to.eql('WELCOME10');
+        pm.expect(o.discountAmount).to.eql(Math.min(Math.round(o.subtotal * 0.1), 20000));
+        pm.expect(o.total).to.eql(o.subtotal - o.discountAmount);
+      });
+      pm.collectionVariables.set('pendingOrderId', o.id);
+    language: text/javascript
+order: 1000

@@ -1,0 +1,30 @@
+$kind: http-request
+description: |-
+  **ORD-T05** – Số lượng = 0 (dưới biên) → 400
+
+  - **Yêu cầu:** FR-05
+  - **Kỹ thuật:** Giá trị biên (min − 1)
+  - **Kết quả mong đợi:** 400
+url: "{{baseUrl}}/orders"
+method: POST
+headers:
+  Authorization: Bearer {{userToken}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "items": [
+        {
+          "productId": "1",
+          "size": "M",
+          "toppings": [],
+          "qty": 0
+        }
+      ]
+    }
+scripts:
+  - type: afterResponse
+    code: pm.test('Status 400', () => pm.response.to.have.status(400));
+    language: text/javascript
+order: 5000

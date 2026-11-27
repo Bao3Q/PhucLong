@@ -1,0 +1,38 @@
+$kind: http-request
+name: SM-T11 · Khách huỷ đơn PENDING → CANCELLED, hoàn lại tồn kho
+description: |-
+  **SM-T11** – Khách huỷ đơn PENDING → CANCELLED, hoàn lại tồn kho
+
+  - **Yêu cầu:** Task 10.1, Task 10.3
+  - **Kỹ thuật:** Chuyển trạng thái + kiểm tra tồn kho
+  - **Kết quả mong đợi:** 200, status CANCELLED, tồn kho sản phẩm được cộng lại
+url: "{{baseUrl}}/orders/{{cancelOrderId}}/status"
+method: PATCH
+headers:
+  Authorization: Bearer {{userToken}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "status": "CANCELLED"
+    }
+scripts:
+  - type: beforeRequest
+    code: |-
+      pm.sendRequest({ url: pm.variables.get('baseUrl').replace(/\/$/, '') + '/orders/' + pm.collectionVariables.get('cancelOrderId'), header: { Authorization: 'Bearer ' + pm.collectionVariables.get('userToken') } }, (e, o) => {
+        const it = o.json().items[0];
+        pm.collectionVariables.set('cancelProductId', it.productId);
+        pm.collectionVariables.set('cancelQty', it.qty);
+        pm.sendRequest(pm.variables.get('baseUrl').replace(/\/$/, '') + '/products/' + it.productId, (e2, p) => pm.collectionVariables.set('stockBefore', p.json().stock));
+      });
+    language: text/javascript
+  - type: afterResponse
+    code: |-
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('status CANCELLED', () => pm.expect(pm.response.json().status).to.eql('CANCELLED'));
+      pm.sendRequest(pm.variables.get('baseUrl').replace(/\/$/, '') + '/products/' + pm.collectionVariables.get('cancelProductId'), (e, p) => {
+        pm.test('Tồn kho được hoàn lại', () => pm.expect(p.json().stock).to.eql(Number(pm.collectionVariables.get('stockBefore')) + Number(pm.collectionVariables.get('cancelQty'))));
+      });
+    language: text/javascript
+order: 11000

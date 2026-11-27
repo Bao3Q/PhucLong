@@ -1,0 +1,27 @@
+$kind: http-request
+name: PRO-T02 · Kiểm tra mã với đơn đúng 50.000đ (biên tối thiểu) → hợp lệ
+description: |-
+  **PRO-T02** – Kiểm tra mã với đơn đúng 50.000đ (biên tối thiểu) → hợp lệ
+
+  - **Yêu cầu:** Task 10.4
+  - **Kỹ thuật:** Giá trị biên (min)
+  - **Kết quả mong đợi:** 201, discount = 5.000, total = 45.000
+url: "{{baseUrl}}/promotions/validate"
+method: POST
+headers:
+  Authorization: Bearer {{userToken}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "code": "WELCOME10",
+      "subtotal": 50000
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 201', () => pm.response.to.have.status(201));
+      pm.test('discount 5000, total 45000', () => pm.expect(pm.response.json()).to.eql({ code: 'WELCOME10', discountAmount: 5000, total: 45000 }));
+    language: text/javascript
+order: 2000

@@ -1,0 +1,30 @@
+$kind: http-request
+name: AUTH-T04 · Đăng ký mật khẩu 7 ký tự (dưới biên) → 400
+description: |-
+  **AUTH-T04** – Đăng ký mật khẩu 7 ký tự (dưới biên) → 400
+
+  - **Yêu cầu:** FR-04, NFR validate
+  - **Kỹ thuật:** Giá trị biên (min − 1)
+  - **Kết quả mong đợi:** 400, báo mật khẩu tối thiểu 8 ký tự
+url: "{{baseUrl}}/auth/register"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "email": "bien7@phuclong.test",
+      "password": "Abc123!"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 400', () => pm.response.to.have.status(400));
+      pm.test('Thông báo lỗi chứa "8 ký tự"', () => {
+        const m = pm.response.json().message;
+        const s = Array.isArray(m) ? m.join(' | ') : String(m);
+        pm.expect(s).to.include("8 ký tự");
+      });
+    language: text/javascript
+order: 4000
