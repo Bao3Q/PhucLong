@@ -1,6 +1,6 @@
 # Task 1.3 — Đặc tả use-case trọng tâm
 
-**UC-01: Đặt và thanh toán đơn hàng** (theo khuyến nghị Task 1.3 của đề bài). UC-01 gồm hai phần nối tiếp: **Đặt đơn hàng** (UC06 trong sơ đồ tổng quát) và **Thanh toán đơn hàng** (UC07).
+**UC-01: Đặt và thanh toán đơn hàng** (theo khuyến nghị Task 1.3 của đề bài). UC-01 gồm hai phần nối tiếp: **Đặt đơn hàng** (UC04 trong sơ đồ tổng quát) và **Thanh toán đơn hàng** (UC06).
 
 ## Sơ đồ use-case phạm vi UC-01
 
@@ -12,7 +12,7 @@ Nguồn: [`docs/diagrams/Task1_3_UseCase.puml`](../diagrams/Task1_3_UseCase.puml
 
 | | |
 | :---: | :--- |
-| **Mã** | UC-01a (UC06) |
+| **Mã** | UC-01a (UC04) |
 | **Tóm tắt** | Khách hàng chuyển các món đã chọn trong giỏ hàng thành một đơn hàng. |
 | **Actor chính** | Khách hàng (đã đăng nhập) |
 | **Trigger** | Khách hàng bấm **“Đặt hàng / Xác nhận trả”** ở trang Checkout. |
@@ -54,7 +54,7 @@ Nguồn: [`docs/diagrams/Task1_3_UseCase.puml`](../diagrams/Task1_3_UseCase.puml
 
 | | |
 | :---: | :--- |
-| **Mã** | UC-01b (UC07) |
+| **Mã** | UC-01b (UC06) |
 | **Tóm tắt** | Khách hàng thanh toán đơn bằng Ví MoMo hoặc Thẻ (dịch vụ mô phỏng). |
 | **Actor** | Khách hàng (chính); Dịch vụ thanh toán mô phỏng (phụ) |
 | **Trigger** | Đơn vừa được tạo ở trạng thái PENDING và khách bấm **“Thanh toán”** (hoặc web tự gửi ngay sau bước tạo đơn). |

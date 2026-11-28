@@ -55,13 +55,13 @@ Mức ưu tiên theo **MoSCoW**: Must (bắt buộc cho MVP) · Should (nên có
 
 ![Use-case tổng quát](../diagrams/Task1_2_UseCase.svg)
 
-Nguồn: [`docs/diagrams/Task1_2_UseCase.puml`](../diagrams/Task1_2_UseCase.puml) · ảnh: `Task1_2_UseCase.svg`, `Task1_2_UseCase.png`.
+Nguồn: [`docs/diagrams/Task1_2_UseCase.drawio`](../diagrams/Task1_2_UseCase.drawio) · ảnh: `Task1_2_UseCase.svg`, `Task1_2_UseCase.png`.
 
 | Actor | Use-case chính |
 | --- | --- |
-| Khách hàng | UC01 Xem menu · UC02 Chi tiết món · UC03 Giỏ hàng · UC04 Đăng ký · UC05 Đăng nhập · UC06 Đặt đơn · UC09 Xác nhận & trạng thái · UC10 Lịch sử đơn |
-| Quản trị viên / Nhân viên quầy (ADMIN) | UC11 Cập nhật trạng thái đơn · UC12 Quản lý sản phẩm · UC13 Xem tồn kho |
-| Dịch vụ thanh toán (mô phỏng / SePay) | UC07 Thanh toán đơn |
-| Bộ hẹn giờ hệ thống | UC14 Hủy đơn PENDING quá hạn |
+| Khách hàng | UC01 Xem menu & chi tiết món · UC02 Giỏ hàng · UC03 Đăng ký / Đăng nhập · UC04 Đặt đơn (bao gồm UC03 Đăng nhập; mở rộng: UC05 Áp mã khuyến mãi / điểm thưởng) · UC06 Thanh toán · UC07 Theo dõi đơn · UC08 Hủy đơn chưa thanh toán · UC09 Xem điểm thưởng |
+| Quản trị viên / Nhân viên quầy (ADMIN) | UC03 Đăng nhập · UC08 Hủy đơn (cả đơn đã thanh toán, chưa pha chế) · UC10 Xử lý đơn hàng (trạng thái, xác nhận hoàn tiền SePay) · UC11 Quản lý sản phẩm & tồn kho · UC12 Quản lý khuyến mãi & điểm thưởng |
+| Cổng thanh toán (Ví/Thẻ mô phỏng, SePay) | UC06 Thanh toán đơn |
+| Bộ hẹn giờ hệ thống | UC08 Hủy đơn PENDING / PAYMENT_FAILED quá hạn (10 phút) |
 
-Use-case trọng tâm được đặc tả chi tiết: **UC-01 Đặt và thanh toán đơn hàng** (gồm UC06 + UC07) — xem [`13_usecase.md`](13_usecase.md).
+Use-case trọng tâm được đặc tả chi tiết: **UC-01 Đặt và thanh toán đơn hàng** (gồm UC04 + UC06) — xem [`13_usecase.md`](13_usecase.md).

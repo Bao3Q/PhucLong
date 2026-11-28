@@ -1,6 +1,6 @@
 # Task 2 — Mô hình hoá hệ thống
 
-Tên file theo chuẩn `TaskX_Y_TênSơĐồ`; mỗi sơ đồ có **file nguồn** và hai ảnh kết xuất cùng tên: **`.svg`** (xem trên GitHub, phóng to không vỡ) và **`.png`** (chèn vào báo cáo). File nguồn của activity là **`.drawio`** (mở và sửa bằng [diagrams.net](https://app.diagrams.net) hoặc extension Draw.io trong VS Code); các sơ đồ còn lại dùng **PlantUML (`.puml`)**. Mã sơ đồ (Activity-01, Sequence-01, Class-01) được dùng trong [`../traceability-matrix.md`](../traceability-matrix.md).
+Tên file theo chuẩn `TaskX_Y_TênSơĐồ`; mỗi sơ đồ có **file nguồn** và hai ảnh kết xuất cùng tên: **`.svg`** (xem trên GitHub, phóng to không vỡ) và **`.png`** (chèn vào báo cáo). File nguồn của activity và use-case tổng quát (`Task1_2_UseCase`) là **`.drawio`** (mở và sửa bằng [diagrams.net](https://app.diagrams.net) hoặc extension Draw.io trong VS Code); các sơ đồ còn lại dùng **PlantUML (`.puml`)**. Mã sơ đồ (Activity-01, Sequence-01, Class-01) được dùng trong [`../traceability-matrix.md`](../traceability-matrix.md).
 
 | Mã | Sơ đồ | Nguồn | Ảnh |
 | --- | --- | --- | --- |
