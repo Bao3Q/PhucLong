@@ -1,3 +1,0 @@
-$kind: collection
-description: GET /orders/:id, GET /orders/me
-order: 7000

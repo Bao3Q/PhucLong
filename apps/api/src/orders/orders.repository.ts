@@ -130,6 +130,13 @@ export class OrdersRepository {
     return order ? this.clone(order) : undefined;
   }
 
+  hasVoucherInMemory(userId: string, voucherCode: string): boolean {
+    for (const order of this.orders.values()) {
+      if (order.userId === userId && order.voucherCode === voucherCode) return true;
+    }
+    return false;
+  }
+
   /** Lấy toàn bộ đơn của một user, mới nhất trước. */
   async findByUserId(userId: string): Promise<Order[]> {
     if (this.prisma) {

@@ -1,4 +1,0 @@
-$kind: collection
-name: 5. Thanh toán Ví/Thẻ + idempotent + điểm thưởng (FR-05, Task 8, 10.2, 10.4)
-description: POST /payments, header Idempotency-Key.
-order: 6000

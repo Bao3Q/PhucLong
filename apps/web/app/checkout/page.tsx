@@ -1,15 +1,18 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import SiteHeader from '@/components/SiteHeader';
+import { useIsLoggedIn } from '@/components/AuthNav';
 import {
   createOrder,
   createSePayCheckout,
   payOrder,
+  fetchAvailableVouchers,
   validateVoucher,
   fetchLoyaltyPoints,
   type ApiResult,
+  type AvailableVoucher,
   type VoucherValidation,
   type LoyaltyPoints,
 } from '@/lib/api';
@@ -17,7 +20,7 @@ import { cartTotal, toOrderItems, useCart } from '@/lib/cart';
 import { formatVnd } from '@/lib/orders';
 import { getToken } from '@/lib/auth';
 
-type PaymentMethod = 'momo' | 'card' | 'sepay';
+type PaymentMethod = 'card' | 'sepay';
 
 const PAYMENT_METHODS: {
   id: PaymentMethod;
@@ -27,55 +30,69 @@ const PAYMENT_METHODS: {
   iconBg: string;
 }[] = [
   { id: 'sepay', title: 'Chuyển khoản ngân hàng', hint: 'SePay — quét QR, tự xác nhận trong 2 phút', icon: '₫', iconBg: 'bg-[#006A32]' },
-  { id: 'momo', title: 'Ví điện tử', hint: 'MoMo / ZaloPay', icon: 'M', iconBg: 'bg-pink-600' },
   { id: 'card', title: 'Thẻ ngân hàng', hint: 'Visa / Mastercard / Napas', icon: '💳', iconBg: 'bg-blue-600' },
 ];
 
 export default function CheckoutPage() {
   const router = useRouter();
   const { cart, setCart } = useCart();
+  const isLoggedIn = useIsLoggedIn();
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('sepay');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Voucher: nhập mã → validate trước (server) → áp vào tổng hiển thị và
+  // Voucher: chọn mã → validate trước (server) → áp vào tổng hiển thị và
   // gửi kèm khi tạo đơn (server tính lại, không tin số tiền client).
-  const [voucherInput, setVoucherInput] = useState('');
+  const [voucherOptions, setVoucherOptions] = useState<ApiResult<AvailableVoucher[]> | null>(null);
+  const [selectedVoucherCode, setSelectedVoucherCode] = useState('');
   const [voucher, setVoucher] = useState<VoucherValidation | null>(null);
   const [voucherError, setVoucherError] = useState<string | null>(null);
   const [validatingVoucher, setValidatingVoucher] = useState(false);
-  const [loyalty, setLoyalty] = useState<LoyaltyPoints | null>(null);
+  const voucherRequest = useRef(0);
+  const [loyalty, setLoyalty] = useState<ApiResult<LoyaltyPoints> | null>(null);
   const [pointsInput, setPointsInput] = useState('0');
-  const [loyaltyError, setLoyaltyError] = useState<string | null>(null);
 
-  // Giỏ đổi → subtotal đổi nên voucher đã áp không còn đúng.
+  // Giỏ đổi thì bỏ cả voucher đã áp và kết quả kiểm tra đang chờ.
   useEffect(() => {
     setVoucher(null);
     setVoucherError(null);
+    setValidatingVoucher(false);
+    return () => { voucherRequest.current += 1; };
   }, [cart]);
 
   useEffect(() => {
-    if (!getToken()) return;
-
-    fetchLoyaltyPoints().then((res) => {
-      if (res.ok) {
-        setLoyalty(res.data);
-      }
+    let active = true;
+    void fetchAvailableVouchers().then((res) => {
+      if (active) setVoucherOptions(res);
     });
+    return () => { active = false; };
   }, []);
 
+  useEffect(() => {
+    setLoyalty(null);
+    if (!isLoggedIn) {
+      setPointsInput('0');
+      return;
+    }
+
+    let active = true;
+    void fetchLoyaltyPoints().then((res) => {
+      if (active) setLoyalty(res);
+    });
+    return () => { active = false; };
+  }, [isLoggedIn]);
+
   const applyVoucher = async () => {
-    const code = voucherInput.trim();
-    if (!code || cart.length === 0) return;
+    if (!selectedVoucherCode || cart.length === 0 || validatingVoucher) return;
+    const requestId = ++voucherRequest.current;
     setValidatingVoucher(true);
     setVoucherError(null);
-    const res = await validateVoucher(code, cartTotal(cart));
+    const res = await validateVoucher(selectedVoucherCode, cartTotal(cart));
+    if (requestId !== voucherRequest.current) return;
     if (res.ok) {
       setVoucher(res.data);
-      setVoucherInput(res.data.code);
     } else if (res.kind === 'unauthenticated') {
-      // Xem voucher cũng cần đăng nhập (khớp với đặt đơn) → sang /login rồi quay lại.
-      router.push('/login?next=/checkout');
+      goToLogin();
     } else {
       setVoucher(null);
       setVoucherError(res.message);
@@ -104,20 +121,23 @@ export default function CheckoutPage() {
     totalCartPrice - discountAmount
   );
 
-  const requestedPoints = Math.max(
-    0,
-    Math.floor(Number(pointsInput) || 0)
-  );
-
-  const maxPoints = Math.floor(
-    afterVoucher * 0.2 / 1000
-  );
-
-  const pointsToRedeem = Math.min(
-    requestedPoints,
-    loyalty?.loyaltyPoints ?? 0,
-    maxPoints
-  );
+  const balance = isLoggedIn && loyalty?.ok ? loyalty.data.loyaltyPoints : null;
+  const requestedPoints = Number(pointsInput);
+  const orderPointsLimit = Math.floor(afterVoucher * 0.2 / 1000);
+  const maxPoints = Math.min(balance ?? 0, orderPointsLimit);
+  let loyaltyError: string | null = null;
+  if (!Number.isSafeInteger(requestedPoints) || requestedPoints < 0) {
+    loyaltyError = 'Vui lòng nhập số nguyên không âm.';
+  } else if (requestedPoints > (balance ?? 0)) {
+    loyaltyError = balance === null
+      ? 'Chưa xác minh được số điểm thưởng.'
+      : `Bạn chỉ có ${balance} điểm thưởng.`;
+  } else if (requestedPoints > orderPointsLimit) {
+    loyaltyError = `Đơn hàng này dùng tối đa ${orderPointsLimit} điểm sau khi áp mã giảm giá.`;
+  }
+  const pointsToRedeem = loyaltyError ? 0 : requestedPoints;
+  const confirmDisabled = isSubmitting || validatingVoucher || Boolean(loyaltyError);
+  const availableVouchers = voucherOptions?.ok ? voucherOptions.data : [];
 
   const loyaltyDiscount =
     pointsToRedeem * 1000;
@@ -149,11 +169,12 @@ export default function CheckoutPage() {
   function clearCart() {
     setCart([]);
     setVoucher(null);
-    setVoucherInput('');
+    setSelectedVoucherCode('');
+    setPointsInput('0');
   }
 
   const handleConfirmPayment = async () => {
-    if (cart.length === 0) return;
+    if (cart.length === 0 || confirmDisabled) return;
 
     // Đặt đơn cần đăng nhập: chưa có token thì chuyển sang /login rồi quay lại đây.
     if (!getToken()) {
@@ -167,7 +188,7 @@ export default function CheckoutPage() {
     try {
       // Client KHÔNG gửi giá: server tra bảng giá và tự tính unitPrice/total,
       // kèm voucherCode (nếu đã áp) để server xác nhận lần cuối.
-      const orderData = unwrap(await createOrder(toOrderItems(cart), voucher?.code,pointsToRedeem));
+      const orderData = unwrap(await createOrder(toOrderItems(cart), voucher?.code, pointsToRedeem));
       if (!orderData) return;
 
       if (paymentMethod === 'sepay') {
@@ -180,7 +201,7 @@ export default function CheckoutPage() {
         return;
       }
 
-      // Luồng momo/card (hoàn tất ngay) — cần JWT và chỉ chủ đơn.
+      // Thanh toán thẻ hoàn tất ngay, cần JWT và chỉ chủ đơn.
       clearCart();
       const idempotencyKey = `IDEM-${Date.now()}-${orderData.id}`;
       const payData = unwrap(await payOrder(orderData.id, paymentMethod, idempotencyKey));
@@ -275,32 +296,44 @@ export default function CheckoutPage() {
 
               {/* Voucher */}
               <div className="space-y-2">
-                <label className="text-xs font-bold uppercase text-gray-400 block">Mã giảm giá</label>
+                <label htmlFor="checkout-voucher" className="text-xs font-bold uppercase text-gray-600 block">Mã giảm giá</label>
                 <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={voucherInput}
-                    onChange={(e) => setVoucherInput(e.target.value.toUpperCase())}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') void applyVoucher();
+                  <select
+                    id="checkout-voucher"
+                    value={selectedVoucherCode}
+                    disabled={validatingVoucher || isSubmitting || availableVouchers.length === 0}
+                    onChange={(e) => {
+                      setSelectedVoucherCode(e.target.value);
+                      setVoucher(null);
+                      setVoucherError(null);
                     }}
-                    placeholder="VD: WELCOME10"
-                    className="flex-1 px-4 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-[#006A32]"
-                  />
-                  <button
-                    onClick={applyVoucher}
-                    disabled={validatingVoucher || !voucherInput.trim()}
-                    className="px-4 py-2.5 rounded-xl text-sm font-bold border border-[#006A32]/40 text-[#006A32] hover:bg-[#006A32]/5 transition disabled:opacity-50"
+                    className="min-w-0 flex-1 truncate rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm focus-visible:outline-[#006A32] disabled:bg-gray-50"
                   >
-                    {validatingVoucher ? '...' : 'Áp dụng'}
+                    <option value="">
+                      {voucherOptions === null ? 'Đang tải mã giảm giá…' : availableVouchers.length ? 'Không áp dụng mã' : 'Không có mã để chọn'}
+                    </option>
+                    {availableVouchers.map(({ code, name }) => (
+                      <option key={code} value={code}>{code} — {name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={applyVoucher}
+                    disabled={validatingVoucher || isSubmitting || !selectedVoucherCode || Boolean(voucher)}
+                    className="shrink-0 px-4 py-2.5 rounded-xl text-sm font-bold border border-[#006A32]/40 text-[#006A32] hover:bg-[#006A32]/5 transition disabled:opacity-50"
+                  >
+                    {validatingVoucher ? 'Đang kiểm tra…' : 'Áp dụng'}
                   </button>
                 </div>
+                {voucherOptions?.ok === false && (
+                  <p role="status" className="text-xs text-red-700">Không thể tải danh sách mã giảm giá. Bạn có thể tải lại trang để thử lại.</p>
+                )}
                 {voucherError && (
                   <p role="alert" className="text-[11px] text-red-600">⚠️ {voucherError}</p>
                 )}
                 {voucher && (
                   <p className="text-[11px] text-emerald-700">
-                    ✓ Đã áp dụng <span className="font-bold">{voucher.code}</span> — giảm {formatVnd(voucher.discountAmount)} (server sẽ tính lại khi tạo đơn)
+                    ✓ Đã áp dụng <span className="font-bold">{voucher.code}</span> — giảm {formatVnd(voucher.discountAmount)}
                   </p>
                 )}
               </div>
@@ -313,30 +346,31 @@ export default function CheckoutPage() {
                   </h3>
 
                   <p className="text-xs text-gray-500 mt-1">
-                    Số điểm hiện có: {loyalty?.loyaltyPoints ?? 0} điểm
+                    {balance !== null ? `Số điểm hiện có: ${balance} điểm` : !isLoggedIn ? 'Đăng nhập để sử dụng điểm thưởng.' : loyalty === null ? 'Đang tải số điểm hiện có…' : 'Không thể tải số điểm hiện có.'}
                   </p>
                 </div>
 
                 <div className="flex gap-2">
                   <input
                     type="number"
-                    min="0"
-                    step="1"
+                    min={0}
+                    max={maxPoints}
+                    step={1}
+                    aria-label="Số điểm muốn đổi"
+                    aria-invalid={Boolean(loyaltyError)}
+                    aria-describedby={loyaltyError ? 'checkout-points-error' : undefined}
+                    disabled={balance === null || isSubmitting}
                     value={pointsInput}
-                    onChange={(e) => {
-                      setPointsInput(e.target.value);
-                      setLoyaltyError(null);
-                    }}
+                    onChange={(e) => setPointsInput(e.target.value)}
                     placeholder="Nhập số điểm muốn đổi"
-                    className="flex-1 px-4 py-2.5 text-sm rounded-xl border border-gray-200"
+                    className="min-w-0 flex-1 px-4 py-2.5 text-sm rounded-xl border border-gray-200 aria-invalid:border-red-600 disabled:bg-gray-50"
                   />
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setPointsInput(String(maxPoints));
-                    }}
-                    className="px-4 rounded-xl bg-[#006A32] text-white text-xs font-bold"
+                    onClick={() => setPointsInput(String(maxPoints))}
+                    disabled={balance === null || isSubmitting}
+                    className="shrink-0 px-4 rounded-xl bg-[#006A32] text-white text-xs font-bold disabled:opacity-50"
                   >
                     Tối đa
                   </button>
@@ -348,7 +382,7 @@ export default function CheckoutPage() {
                 </p>
 
                 {loyaltyError && (
-                  <p className="text-xs text-red-600">
+                  <p id="checkout-points-error" role="alert" className="text-xs text-red-700">
                     {loyaltyError}
                   </p>
                 )}
@@ -362,27 +396,34 @@ export default function CheckoutPage() {
 
               </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase text-gray-400 block">Phương thức thanh toán</label>
+              <fieldset className="min-w-0 space-y-2">
+                <legend className="mb-2 text-xs font-bold uppercase text-gray-600">Phương thức thanh toán</legend>
 
                 {PAYMENT_METHODS.map((m) => (
-                  <div
+                  <label
                     key={m.id}
-                    onClick={() => setPaymentMethod(m.id)}
                     className={`p-4 rounded-2xl border cursor-pointer flex items-center justify-between transition ${paymentMethod === m.id ? 'border-[#006A32] bg-[#006A32]/5' : 'border-gray-200'
                       }`}
                   >
-                    <div className="flex items-center space-x-3">
-                      <div className={`w-8 h-8 ${m.iconBg} rounded-lg flex items-center justify-center text-white font-bold text-xs`}>{m.icon}</div>
-                      <div>
-                        <h5 className="font-bold text-xs">{m.title}</h5>
-                        <p className="text-[10px] text-gray-400">{m.hint}</p>
-                      </div>
-                    </div>
-                    <input type="radio" checked={paymentMethod === m.id} readOnly className="text-[#006A32]" />
-                  </div>
+                    <span className="flex items-center gap-3">
+                      <span aria-hidden="true" className={`w-8 h-8 shrink-0 ${m.iconBg} rounded-lg flex items-center justify-center text-white font-bold text-xs`}>{m.icon}</span>
+                      <span>
+                        <span id={`payment-method-${m.id}`} className="block font-bold text-xs">{m.title}</span>
+                        <span className="block text-[10px] text-gray-600">{m.hint}</span>
+                      </span>
+                    </span>
+                    <input
+                      type="radio"
+                      name="payment-method"
+                      checked={paymentMethod === m.id}
+                      onChange={() => setPaymentMethod(m.id)}
+                      disabled={isSubmitting}
+                      aria-labelledby={`payment-method-${m.id}`}
+                      className="ml-2 shrink-0 accent-[#006A32]"
+                    />
+                  </label>
                 ))}
-              </div>
+              </fieldset>
 
               <div className="space-y-2 text-xs border-t pt-4">
                 <div className="flex justify-between text-gray-500">
@@ -413,8 +454,8 @@ export default function CheckoutPage() {
 
               <button
                 onClick={handleConfirmPayment}
-                disabled={isSubmitting}
-                className={`w-full py-3.5 rounded-2xl font-bold shadow-lg transition flex justify-center items-center space-x-2 text-white ${isSubmitting ? 'bg-stone-400 cursor-not-allowed' : 'bg-[#006A32] hover:bg-[#005227]'
+                disabled={confirmDisabled}
+                className={`w-full py-3.5 rounded-2xl font-bold shadow-lg transition flex justify-center items-center space-x-2 text-white ${confirmDisabled ? 'bg-stone-400 cursor-not-allowed' : 'bg-[#006A32] hover:bg-[#005227]'
                   }`}
               >
                 <span>{isSubmitting ? 'Đang xử lý thanh toán...' : `Xác nhận trả ${formatVnd(finalTotal)}`}</span>

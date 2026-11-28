@@ -1,3 +1,0 @@
-$kind: collection
-description: 'Tạo sản phẩm tồn kho 3, gửi 5 đơn cùng lúc: không được bán vượt 3. Sản phẩm test "QA Concurrency" được giữ lại với tồn kho 0.'
-order: 9000

@@ -15,8 +15,8 @@ export default function SiteHeader() {
   const total = cartTotal(cart);
 
   return (
-    <header className="bg-white border-b border-stone-200/80 px-6 lg:px-12 py-4 flex justify-between items-center">
-      <Link href="/" className="flex items-center space-x-2">
+    <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-stone-200/80 bg-white px-4 py-4 sm:px-6 lg:px-12">
+      <Link href="/" className="flex shrink-0 items-center space-x-2">
         <span className="bg-[#006A32] text-white px-2.5 py-1 rounded-md font-bold text-sm">
           PL
         </span>
@@ -25,7 +25,7 @@ export default function SiteHeader() {
         </span>
       </Link>
 
-      <nav className="flex items-center gap-5 text-sm font-semibold">
+      <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-semibold sm:gap-x-5">
         <Link href="/" className="text-stone-600 hover:text-[#006A32] transition">
           Menu
         </Link>

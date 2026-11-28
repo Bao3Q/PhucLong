@@ -1,0 +1,2947 @@
+{
+  "info": {
+    "_postman_id": "1f0e982c-ab33-4a23-ab6a-d2d9d9d02ccd",
+    "name": "PhucLong – BrewLite test cases",
+    "description": "Bộ test case backend cho repo Bao3Q/PhucLong, bám theo đề BrewLite (mục 12.1, Task 10, NFR).\n\nMỗi request là một test case: mã TC, yêu cầu liên quan, kỹ thuật thiết kế test, tiền điều kiện và kết quả mong đợi nằm trong phần mô tả (tab Docs).\n\nChạy cả collection theo thứ tự (Run collection). Đổi biến `baseUrl` trong tab Variables nếu chạy với server khác.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "0. Health check",
+      "description": "NFR: hệ thống sẵn sàng.",
+      "item": [
+        {
+          "name": "NFR-T01 · GET /health → status ok",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status = ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "**NFR-T01** – GET /health → status ok\n\n- **Yêu cầu:** NFR (Assignment 2, Task 5.2)\n- **Kỹ thuật:** Smoke test\n- **Kết quả mong đợi:** 200, status = \"ok\""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1. Menu & chi tiết sản phẩm (FR-01, FR-02)",
+      "description": "GET /products, GET /products/:id",
+      "item": [
+        {
+          "name": "API-T01 · Xem menu → danh sách sản phẩm đủ trường",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const list = pm.response.json();",
+                  "pm.test('Mảng không rỗng', () => pm.expect(list).to.be.an('array').that.is.not.empty);",
+                  "pm.test('Mỗi sản phẩm đủ trường, giá là số ≥ 0', () => list.forEach((p) => {",
+                  "  pm.expect(p).to.include.keys('id', 'name', 'basePrice', 'image', 'stock');",
+                  "  pm.expect(p.basePrice).to.be.a('number').and.at.least(0);",
+                  "}));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "**API-T01** – Xem menu → danh sách sản phẩm đủ trường\n\n- **Yêu cầu:** FR-01\n- **Kỹ thuật:** Happy path\n- **Kết quả mong đợi:** 200, mảng không rỗng, mỗi phần tử có id, name, basePrice, ảnh, stock"
+          },
+          "response": []
+        },
+        {
+          "name": "API-T02 · Lọc menu theo danh mục → chỉ trả đúng danh mục",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Mọi phần tử đúng danh mục', () => pm.response.json().forEach((p) => pm.expect(p.category).to.eql('Cà Phê')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products?category=Cà Phê",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "category",
+                  "value": "Cà Phê"
+                }
+              ]
+            },
+            "description": "**API-T02** – Lọc menu theo danh mục → chỉ trả đúng danh mục\n\n- **Yêu cầu:** FR-01\n- **Kỹ thuật:** Phân vùng tương đương\n- **Kết quả mong đợi:** 200, mọi sản phẩm có category = \"Cà Phê\""
+          },
+          "response": []
+        },
+        {
+          "name": "API-T03 · Xem chi tiết sản phẩm id = 1",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json();",
+                  "pm.test('Đúng id \"1\"', () => pm.expect(p.id).to.eql('1'));",
+                  "pm.collectionVariables.set('price1', p.basePrice);",
+                  "pm.test('Có size S/M/L (+0/5k/10k) và topping', () => {",
+                  "  pm.expect(p.sizes.map((s) => s.price)).to.eql([0, 5000, 10000]);",
+                  "  pm.expect(p.toppings).to.be.an('array').that.is.not.empty;",
+                  "});",
+                  "pm.collectionVariables.set('toppingName', p.toppings[0].name);",
+                  "pm.collectionVariables.set('toppingPrice', p.toppings[0].price);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products",
+                "1"
+              ]
+            },
+            "description": "**API-T03** – Xem chi tiết sản phẩm id = 1\n\n- **Yêu cầu:** FR-02\n- **Kỹ thuật:** Happy path\n- **Kết quả mong đợi:** 200, đúng sản phẩm id \"1\""
+          },
+          "response": []
+        },
+        {
+          "name": "API-T04 · Xem sản phẩm không tồn tại → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/khong-ton-tai",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products",
+                "khong-ton-tai"
+              ]
+            },
+            "description": "**API-T04** – Xem sản phẩm không tồn tại → 404\n\n- **Yêu cầu:** FR-02\n- **Kỹ thuật:** Ngoại lệ (dữ liệu không tồn tại)\n- **Kết quả mong đợi:** 404 Not Found"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Đăng ký / Đăng nhập JWT (FR-04)",
+      "description": "POST /auth/register, POST /auth/login. Tạo 2 tài khoản mới mỗi lần chạy: A (chính) và B (để test phân quyền).",
+      "item": [
+        {
+          "name": "AUTH-T01 · Đăng ký hợp lệ → 201, không trả mật khẩu",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const t = Date.now();",
+                  "pm.collectionVariables.set('emailA', 'qa.a.' + t + '@phuclong.test');",
+                  "pm.collectionVariables.set('emailB', 'qa.b.' + t + '@phuclong.test');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const u = pm.response.json();",
+                  "pm.test('Có id, đúng email, role CUSTOMER', () => {",
+                  "  pm.expect(u.id).to.be.a('string').and.not.empty;",
+                  "  pm.expect(u.email).to.eql(pm.collectionVariables.get('emailA'));",
+                  "  pm.expect(u.role).to.eql('CUSTOMER');",
+                  "});",
+                  "pm.test('Không lộ mật khẩu', () => pm.expect(u).to.not.have.any.keys('password', 'passwordHash'));",
+                  "pm.collectionVariables.set('userIdA', u.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "**AUTH-T01** – Đăng ký hợp lệ → 201, không trả mật khẩu\n\n- **Yêu cầu:** FR-04, NFR bảo mật\n- **Kỹ thuật:** Happy path\n- **Kết quả mong đợi:** 201, có id + email, không có password/passwordHash",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{emailA}}\",\n  \"password\": \"Passw0rd!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "AUTH-T02 · Đăng ký trùng email → 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "**AUTH-T02** – Đăng ký trùng email → 409\n\n- **Yêu cầu:** FR-04\n- **Kỹ thuật:** Ngoại lệ (trùng dữ liệu)\n- **Tiền điều kiện:** AUTH-T01 đã chạy\n- **Kết quả mong đợi:** 409 Conflict",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{emailA}}\",\n  \"password\": \"Passw0rd!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "AUTH-T03 · Đăng ký email sai định dạng → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Thông báo lỗi chứa \"Email không hợp lệ\"', () => {",
+                  "  const m = pm.response.json().message;",
+                  "  const s = Array.isArray(m) ? m.join(' | ') : String(m);",
+                  "  pm.expect(s).to.include(\"Email không hợp lệ\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "**AUTH-T03** – Đăng ký email sai định dạng → 400\n\n- **Yêu cầu:** FR-04, NFR validate\n- **Kỹ thuật:** Phân vùng tương đương (vùng không hợp lệ)\n- **Kết quả mong đợi:** 400, báo lỗi email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"khong-phai-email\",\n  \"password\": \"Passw0rd!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "AUTH-T04 · Đăng ký mật khẩu 7 ký tự (dưới biên) → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Thông báo lỗi chứa \"8 ký tự\"', () => {",
+                  "  const m = pm.response.json().message;",
+                  "  const s = Array.isArray(m) ? m.join(' | ') : String(m);",
+                  "  pm.expect(s).to.include(\"8 ký tự\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "**AUTH-T04** – Đăng ký mật khẩu 7 ký tự (dưới biên) → 400\n\n- **Yêu cầu:** FR-04, NFR validate\n- **Kỹ thuật:** Giá trị biên (min − 1)\n- **Kết quả mong đợi:** 400, báo mật khẩu tối thiểu 8 ký tự",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"bien7@phuclong.test\",\n  \"password\": \"Abc123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "AUTH-T05 · Đăng ký mật khẩu đúng 8 ký tự (biên) + email viết hoa → 201, email chuẩn hoá",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set('rawEmailB', '  ' + pm.collectionVariables.get('emailB').toUpperCase() + '  ');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Email lưu dạng chữ thường, không khoảng trắng', () => pm.expect(pm.response.json().email).to.eql(pm.collectionVariables.get('emailB')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "**AUTH-T05** – Đăng ký mật khẩu đúng 8 ký tự (biên) + email viết hoa → 201, email chuẩn hoá\n\n- **Yêu cầu:** FR-04\n- **Kỹ thuật:** Giá trị biên (min) + chuẩn hoá dữ liệu\n- **Kết quả mong đợi:** 201, email được trim + chuyển chữ thường",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{rawEmailB}}\",\n  \"password\": \"Abcd123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "AUTH-T06 · Đăng nhập đúng → 200 + JWT",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('accessToken là JWT, tokenType Bearer', () => {",
+                  "  pm.expect(b.accessToken.split('.')).to.have.lengthOf(3);",
+                  "  pm.expect(b.tokenType).to.eql('Bearer');",
+                  "});",
+                  "pm.test('JWT chứa đúng userId (sub)', () => {",
+                  "  const payload = JSON.parse(atob(b.accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+                  "  pm.expect(payload.sub).to.eql(pm.collectionVariables.get('userIdA'));",
+                  "});",
+                  "pm.collectionVariables.set('userToken', b.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "**AUTH-T06** – Đăng nhập đúng → 200 + JWT\n\n- **Yêu cầu:** FR-04\n- **Kỹ thuật:** Happy path\n- **Kết quả mong đợi:** 200, accessToken dạng JWT, tokenType Bearer",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{emailA}}\",\n  \"password\": \"Passw0rd!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "AUTH-T07 · Đăng nhập sai mật khẩu → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Thông báo lỗi chứa \"Email hoặc mật khẩu không đúng\"', () => {",
+                  "  const m = pm.response.json().message;",
+                  "  const s = Array.isArray(m) ? m.join(' | ') : String(m);",
+                  "  pm.expect(s).to.include(\"Email hoặc mật khẩu không đúng\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "**AUTH-T07** – Đăng nhập sai mật khẩu → 401\n\n- **Yêu cầu:** FR-04\n- **Kỹ thuật:** Ngoại lệ\n- **Kết quả mong đợi:** 401, thông báo chung \"Email hoặc mật khẩu không đúng\"",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{emailA}}\",\n  \"password\": \"SaiMatKhau1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "AUTH-T08 · Đăng nhập email chưa đăng ký → 401 (cùng thông báo)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Thông báo lỗi chứa \"Email hoặc mật khẩu không đúng\"', () => {",
+                  "  const m = pm.response.json().message;",
+                  "  const s = Array.isArray(m) ? m.join(' | ') : String(m);",
+                  "  pm.expect(s).to.include(\"Email hoặc mật khẩu không đúng\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "**AUTH-T08** – Đăng nhập email chưa đăng ký → 401 (cùng thông báo)\n\n- **Yêu cầu:** FR-04, NFR bảo mật\n- **Kỹ thuật:** Ngoại lệ (không lộ email nào tồn tại)\n- **Kết quả mong đợi:** 401, cùng thông báo với AUTH-T07",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"chua.dang.ky@phuclong.test\",\n  \"password\": \"Passw0rd!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "AUTH-T09 · Đăng nhập tài khoản B",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('userTokenB', pm.response.json().accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "**AUTH-T09** – Đăng nhập tài khoản B\n\n- **Yêu cầu:** FR-04\n- **Kỹ thuật:** Chuẩn bị dữ liệu\n- **Kết quả mong đợi:** 200, lưu token B",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{emailB}}\",\n  \"password\": \"Abcd123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "AUTH-T10 · Đăng nhập ADMIN → role ADMIN",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('role = ADMIN', () => pm.expect(pm.response.json().user.role).to.eql('ADMIN'));",
+                  "pm.collectionVariables.set('adminToken', pm.response.json().accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "**AUTH-T10** – Đăng nhập ADMIN → role ADMIN\n\n- **Yêu cầu:** FR-04\n- **Kỹ thuật:** Phân quyền\n- **Kết quả mong đợi:** 200, user.role = ADMIN",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Đặt đơn (FR-05)",
+      "description": "POST /orders: cần JWT, validate giỏ hàng, server tự tính giá, lưu PENDING.",
+      "item": [
+        {
+          "name": "ORD-T01 · Đặt đơn chưa đăng nhập → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "**ORD-T01** – Đặt đơn chưa đăng nhập → 401\n\n- **Yêu cầu:** FR-05, Task 7 (guard)\n- **Kỹ thuật:** Phân quyền\n- **Kết quả mong đợi:** 401 Unauthorized",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"1\",\n      \"size\": \"M\",\n      \"toppings\": [],\n      \"qty\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "ORD-T02 · Đặt đơn với token giả → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer abc.def.ghi",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "**ORD-T02** – Đặt đơn với token giả → 401\n\n- **Yêu cầu:** FR-05, NFR bảo mật\n- **Kỹ thuật:** Phân quyền\n- **Kết quả mong đợi:** 401 Unauthorized",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"1\",\n      \"size\": \"M\",\n      \"toppings\": [],\n      \"qty\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "ORD-T03 · Giỏ hàng trống → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Thông báo lỗi chứa \"Giỏ hàng không được để trống\"', () => {",
+                  "  const m = pm.response.json().message;",
+                  "  const s = Array.isArray(m) ? m.join(' | ') : String(m);",
+                  "  pm.expect(s).to.include(\"Giỏ hàng không được để trống\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "**ORD-T03** – Giỏ hàng trống → 400\n\n- **Yêu cầu:** FR-05\n- **Kỹ thuật:** Giá trị biên (0 sản phẩm)\n- **Kết quả mong đợi:** 400, \"Giỏ hàng không được để trống\"",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "ORD-T04 · Size không hợp lệ (XL) → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "**ORD-T04** – Size không hợp lệ (XL) → 400\n\n- **Yêu cầu:** FR-02, FR-05\n- **Kỹ thuật:** Phân vùng tương đương (vùng không hợp lệ)\n- **Kết quả mong đợi:** 400",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"1\",\n      \"size\": \"XL\",\n      \"toppings\": [],\n      \"qty\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "ORD-T05 · Số lượng = 0 (dưới biên) → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "**ORD-T05** – Số lượng = 0 (dưới biên) → 400\n\n- **Yêu cầu:** FR-05\n- **Kỹ thuật:** Giá trị biên (min − 1)\n- **Kết quả mong đợi:** 400",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"1\",\n      \"size\": \"M\",\n      \"toppings\": [],\n      \"qty\": 0\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "ORD-T06 · Topping không có trong menu → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Thông báo lỗi chứa \"không hợp lệ\"', () => {",
+                  "  const m = pm.response.json().message;",
+                  "  const s = Array.isArray(m) ? m.join(' | ') : String(m);",
+                  "  pm.expect(s).to.include(\"không hợp lệ\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "**ORD-T06** – Topping không có trong menu → 400\n\n- **Yêu cầu:** FR-02, FR-05\n- **Kỹ thuật:** Phân vùng tương đương (vùng không hợp lệ)\n- **Kết quả mong đợi:** 400, báo topping không hợp lệ",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"1\",\n      \"size\": \"M\",\n      \"toppings\": [\n        \"Phô mai\"\n      ],\n      \"qty\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "ORD-T07 · Sản phẩm không tồn tại → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "**ORD-T07** – Sản phẩm không tồn tại → 404\n\n- **Yêu cầu:** FR-05\n- **Kỹ thuật:** Ngoại lệ\n- **Kết quả mong đợi:** 404",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"khong-ton-tai\",\n      \"size\": \"M\",\n      \"toppings\": [],\n      \"qty\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "ORD-T08 · Đặt đơn hợp lệ (size M + topping, qty 2) → PENDING, server tự tính giá",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const o = pm.response.json();",
+                  "const unit = Number(pm.collectionVariables.get('price1')) + 5000 + Number(pm.collectionVariables.get('toppingPrice'));",
+                  "pm.test('PENDING, có mã đơn', () => {",
+                  "  pm.expect(o.status).to.eql('PENDING');",
+                  "  pm.expect(o.code).to.eql('#' + o.id);",
+                  "});",
+                  "pm.test('Giá do server tính, không dùng giá client gửi', () => {",
+                  "  pm.expect(o.items[0].unitPrice).to.eql(unit);",
+                  "  pm.expect(o.items[0].lineTotal).to.eql(unit * 2);",
+                  "  pm.expect(o.total).to.eql(unit * 2);",
+                  "});",
+                  "pm.collectionVariables.set('orderId', o.id);",
+                  "pm.collectionVariables.set('orderTotal', o.total);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "**ORD-T08** – Đặt đơn hợp lệ (size M + topping, qty 2) → PENDING, server tự tính giá\n\n- **Yêu cầu:** FR-05, Task 6\n- **Kỹ thuật:** Happy path + chống sửa giá từ client\n- **Tiền điều kiện:** Đã đăng nhập (AUTH-T06)\n- **Kết quả mong đợi:** 201, status PENDING, mã đơn #id, unitPrice = giá gốc + 5k (M) + giá topping, bỏ qua unitPrice = 1 do client gửi",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    { \"productId\": \"1\", \"size\": \"M\", \"qty\": 2, \"toppings\": [\"{{toppingName}}\"], \"unitPrice\": 1 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Khuyến mãi (Task 10.4)",
+      "description": "Voucher WELCOME10: giảm 10%, tối đa 20.000đ, đơn từ 50.000đ.",
+      "item": [
+        {
+          "name": "PRO-T01 · Đặt đơn với mã welcome10 (viết thường) → giảm 10%",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const o = pm.response.json();",
+                  "pm.test('Giảm đúng', () => {",
+                  "  pm.expect(o.voucherCode).to.eql('WELCOME10');",
+                  "  pm.expect(o.discountAmount).to.eql(Math.min(Math.round(o.subtotal * 0.1), 20000));",
+                  "  pm.expect(o.total).to.eql(o.subtotal - o.discountAmount);",
+                  "});",
+                  "pm.collectionVariables.set('pendingOrderId', o.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "**PRO-T01** – Đặt đơn với mã welcome10 (viết thường) → giảm 10%\n\n- **Yêu cầu:** Task 10.4\n- **Kỹ thuật:** Happy path + chuẩn hoá mã\n- **Kết quả mong đợi:** 201, voucherCode = WELCOME10, discount = min(10%, 20.000)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"2\",\n      \"size\": \"L\",\n      \"toppings\": [],\n      \"qty\": 2\n    }\n  ],\n  \"voucherCode\": \"welcome10\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PRO-T02 · Kiểm tra mã với đơn đúng 50.000đ (biên tối thiểu) → hợp lệ",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('discount 5000, total 45000', () => pm.expect(pm.response.json()).to.eql({ code: 'WELCOME10', discountAmount: 5000, total: 45000 }));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/promotions/validate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "promotions",
+                "validate"
+              ]
+            },
+            "description": "**PRO-T02** – Kiểm tra mã với đơn đúng 50.000đ (biên tối thiểu) → hợp lệ\n\n- **Yêu cầu:** Task 10.4\n- **Kỹ thuật:** Giá trị biên (min)\n- **Kết quả mong đợi:** 201, discount = 5.000, total = 45.000",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"WELCOME10\",\n  \"subtotal\": 50000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PRO-T03 · Kiểm tra mã với đơn 49.999đ (dưới biên) → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Thông báo lỗi chứa \"50.000\"', () => {",
+                  "  const m = pm.response.json().message;",
+                  "  const s = Array.isArray(m) ? m.join(' | ') : String(m);",
+                  "  pm.expect(s).to.include(\"50.000\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/promotions/validate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "promotions",
+                "validate"
+              ]
+            },
+            "description": "**PRO-T03** – Kiểm tra mã với đơn 49.999đ (dưới biên) → 400\n\n- **Yêu cầu:** Task 10.4\n- **Kỹ thuật:** Giá trị biên (min − 1)\n- **Kết quả mong đợi:** 400, báo áp dụng cho đơn từ 50.000đ",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"WELCOME10\",\n  \"subtotal\": 49999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PRO-T04 · Kiểm tra mã với đơn 500.000đ → giảm tối đa 20.000đ",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('discount bị chặn ở 20000', () => pm.expect(pm.response.json().discountAmount).to.eql(20000));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/promotions/validate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "promotions",
+                "validate"
+              ]
+            },
+            "description": "**PRO-T04** – Kiểm tra mã với đơn 500.000đ → giảm tối đa 20.000đ\n\n- **Yêu cầu:** Task 10.4\n- **Kỹ thuật:** Giá trị biên (mức trần giảm giá)\n- **Kết quả mong đợi:** 201, discount = 20.000",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"WELCOME10\",\n  \"subtotal\": 500000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PRO-T05 · Mã không tồn tại → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/promotions/validate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "promotions",
+                "validate"
+              ]
+            },
+            "description": "**PRO-T05** – Mã không tồn tại → 400\n\n- **Yêu cầu:** Task 10.4\n- **Kỹ thuật:** Ngoại lệ\n- **Kết quả mong đợi:** 400",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"FAKE99\",\n  \"subtotal\": 100000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PRO-T06 · Tạo thêm đơn để test huỷ",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('cancelOrderId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "**PRO-T06** – Tạo thêm đơn để test huỷ\n\n- **Kỹ thuật:** Chuẩn bị dữ liệu\n- **Kết quả mong đợi:** 201",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"2\",\n      \"size\": \"S\",\n      \"toppings\": [],\n      \"qty\": 2\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Thanh toán Ví/Thẻ + idempotent + điểm thưởng (FR-05, Task 8, 10.2, 10.4)",
+      "description": "POST /payments, header Idempotency-Key.",
+      "item": [
+        {
+          "name": "PAY-T01 · Thanh toán chưa đăng nhập → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments"
+              ]
+            },
+            "description": "**PAY-T01** – Thanh toán chưa đăng nhập → 401\n\n- **Yêu cầu:** FR-05\n- **Kỹ thuật:** Phân quyền\n- **Kết quả mong đợi:** 401",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": {{orderId}},\n  \"method\": \"card\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PAY-T03 · Phương thức không hỗ trợ → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "qa-bad-{{$timestamp}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments"
+              ]
+            },
+            "description": "**PAY-T03** – Phương thức không hỗ trợ → 400\n\n- **Yêu cầu:** FR-05\n- **Kỹ thuật:** Phân vùng tương đương (vùng không hợp lệ)\n- **Kết quả mong đợi:** 400",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": {{orderId}},\n  \"method\": \"cash\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PAY-T04 · User B thanh toán đơn của A → bị chặn",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userTokenB}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "qa-other-{{$timestamp}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments"
+              ]
+            },
+            "description": "**PAY-T04** – User B thanh toán đơn của A → bị chặn\n\n- **Yêu cầu:** FR-05, NFR bảo mật\n- **Kỹ thuật:** Phân quyền (truy cập dữ liệu người khác)\n- **Kết quả mong đợi:** 403",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": {{orderId}},\n  \"method\": \"card\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PAY-T05 · Thanh toán Thẻ (card) → PAID",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('payKey', 'qa-pay-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const p = pm.response.json();",
+                  "pm.test('PAID, đúng đơn, đúng số tiền, có transactionId', () => {",
+                  "  pm.expect(p.status).to.eql('PAID');",
+                  "  pm.expect(p.orderId).to.eql(Number(pm.collectionVariables.get('orderId')));",
+                  "  pm.expect(p.amount).to.eql(Number(pm.collectionVariables.get('orderTotal')));",
+                  "  pm.expect(p.transactionId).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.collectionVariables.set('paymentId', p.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{payKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments"
+              ]
+            },
+            "description": "**PAY-T05** – Thanh toán Thẻ (card) → PAID\n\n- **Yêu cầu:** FR-05, Task 8, US-05\n- **Kỹ thuật:** Happy path\n- **Tiền điều kiện:** Đơn ORD-T08 đang PENDING\n- **Kết quả mong đợi:** 201, đơn chuyển PAID, có transactionId",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": {{orderId}},\n  \"method\": \"card\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PAY-T06 · Gửi lại cùng Idempotency-Key → không trừ tiền lần 2",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Cùng payment id', () => pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('paymentId'))));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{payKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments"
+              ]
+            },
+            "description": "**PAY-T06** – Gửi lại cùng Idempotency-Key → không trừ tiền lần 2\n\n- **Yêu cầu:** Task 10.2 (tiêu chí b)\n- **Kỹ thuật:** Kiểm thử idempotency\n- **Tiền điều kiện:** PAY-T05 đã thành công\n- **Kết quả mong đợi:** 201, trả lại đúng payment cũ (cùng id)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": {{orderId}},\n  \"method\": \"card\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PAY-T07 · Dùng lại key cho yêu cầu khác (đổi phương thức) → bị từ chối",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Thông báo lỗi chứa \"Idempotency-Key\"', () => {",
+                  "  const m = pm.response.json().message;",
+                  "  const s = Array.isArray(m) ? m.join(' | ') : String(m);",
+                  "  pm.expect(s).to.include(\"Idempotency-Key\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{payKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments"
+              ]
+            },
+            "description": "**PAY-T07** – Dùng lại key cho yêu cầu khác (đổi phương thức) → bị từ chối\n\n- **Yêu cầu:** Task 10.2\n- **Kỹ thuật:** Kiểm thử idempotency (xung đột key)\n- **Kết quả mong đợi:** 400",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": {{orderId}},\n  \"method\": \"momo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PAY-T08 · Thanh toán lại đơn đã PAID bằng key mới → không trừ tiền lần 2",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Thông báo lỗi chứa \"không còn chờ thanh toán\"', () => {",
+                  "  const m = pm.response.json().message;",
+                  "  const s = Array.isArray(m) ? m.join(' | ') : String(m);",
+                  "  pm.expect(s).to.include(\"không còn chờ thanh toán\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "qa-again-{{$timestamp}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments"
+              ]
+            },
+            "description": "**PAY-T08** – Thanh toán lại đơn đã PAID bằng key mới → không trừ tiền lần 2\n\n- **Yêu cầu:** Task 10.2\n- **Kỹ thuật:** Ngoại lệ nghiệp vụ\n- **Kết quả mong đợi:** 400, đơn không còn chờ thanh toán",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": {{orderId}},\n  \"method\": \"momo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "LOY-T01 · Xem điểm thưởng sau khi thanh toán",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Đã được cộng điểm', () => pm.expect(pm.response.json().loyaltyPoints).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/loyalty",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "loyalty"
+              ]
+            },
+            "description": "**LOY-T01** – Xem điểm thưởng sau khi thanh toán\n\n- **Yêu cầu:** Task 10.4\n- **Kỹ thuật:** Happy path\n- **Kết quả mong đợi:** 200, điểm > 0"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Xác nhận & lịch sử đơn (FR-06)",
+      "description": "GET /orders/:id, GET /orders/me",
+      "item": [
+        {
+          "name": "HIS-T01 · Xem đơn vừa thanh toán → mã đơn + PAID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const o = pm.response.json();",
+                  "pm.test('Có mã đơn, status PAID', () => {",
+                  "  pm.expect(o.code).to.eql('#' + pm.collectionVariables.get('orderId'));",
+                  "  pm.expect(o.status).to.eql('PAID');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "**HIS-T01** – Xem đơn vừa thanh toán → mã đơn + PAID\n\n- **Yêu cầu:** FR-06, Task 9\n- **Kỹ thuật:** Happy path\n- **Kết quả mong đợi:** 200, code = #id, status PAID"
+          },
+          "response": []
+        },
+        {
+          "name": "HIS-T02 · Lịch sử đơn của A → có các đơn vừa tạo, mới nhất trước",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const list = pm.response.json();",
+                  "pm.test('Chứa đơn đã thanh toán và đơn đang chờ', () => {",
+                  "  const ids = list.map((o) => o.id);",
+                  "  pm.expect(ids).to.include(Number(pm.collectionVariables.get('orderId')));",
+                  "  pm.expect(ids).to.include(Number(pm.collectionVariables.get('pendingOrderId')));",
+                  "});",
+                  "pm.test('Mới nhất trước', () => {",
+                  "  for (let i = 1; i < list.length; i++) pm.expect(new Date(list[i - 1].createdAt) >= new Date(list[i].createdAt)).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "me"
+              ]
+            },
+            "description": "**HIS-T02** – Lịch sử đơn của A → có các đơn vừa tạo, mới nhất trước\n\n- **Yêu cầu:** FR-06, Task 9\n- **Kỹ thuật:** Happy path\n- **Kết quả mong đợi:** 200, chứa đơn đã đặt, sắp xếp createdAt giảm dần"
+          },
+          "response": []
+        },
+        {
+          "name": "HIS-T03 · Lịch sử đơn của B → không thấy đơn của A",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Không chứa đơn của A', () => pm.expect(pm.response.json().map((o) => o.id)).to.not.include(Number(pm.collectionVariables.get('orderId'))));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userTokenB}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "me"
+              ]
+            },
+            "description": "**HIS-T03** – Lịch sử đơn của B → không thấy đơn của A\n\n- **Yêu cầu:** FR-06, NFR bảo mật\n- **Kỹ thuật:** Phân quyền\n- **Kết quả mong đợi:** 200, không chứa đơn của A"
+          },
+          "response": []
+        },
+        {
+          "name": "HIS-T04 · User B xem chi tiết đơn của A → bị chặn",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userTokenB}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "**HIS-T04** – User B xem chi tiết đơn của A → bị chặn\n\n- **Yêu cầu:** FR-06, NFR bảo mật\n- **Kỹ thuật:** Phân quyền (truy cập dữ liệu người khác)\n- **Kết quả mong đợi:** 403"
+          },
+          "response": []
+        },
+        {
+          "name": "HIS-T05 · Xem lịch sử chưa đăng nhập → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "me"
+              ]
+            },
+            "description": "**HIS-T05** – Xem lịch sử chưa đăng nhập → 401\n\n- **Yêu cầu:** FR-06\n- **Kỹ thuật:** Phân quyền\n- **Kết quả mong đợi:** 401"
+          },
+          "response": []
+        },
+        {
+          "name": "HIS-T06 · Mã đơn không tồn tại → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "999999"
+              ]
+            },
+            "description": "**HIS-T06** – Mã đơn không tồn tại → 404\n\n- **Yêu cầu:** FR-06\n- **Kỹ thuật:** Ngoại lệ\n- **Kết quả mong đợi:** 404"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. Máy trạng thái đơn hàng (Task 10.1)",
+      "description": "Như trên. Ở PhucLong chỉ ADMIN cập nhật tiến độ; khách chỉ được huỷ đơn chưa thanh toán.",
+      "item": [
+        {
+          "name": "SM-T01 · PENDING → COMPLETED (nhảy cóc) → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{pendingOrderId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{pendingOrderId}}",
+                "status"
+              ]
+            },
+            "description": "**SM-T01** – PENDING → COMPLETED (nhảy cóc) → 400\n\n- **Yêu cầu:** Task 10.1 (tiêu chí a)\n- **Kỹ thuật:** Kiểm thử chuyển trạng thái\n- **Kết quả mong đợi:** 400, chặn chuyển trạng thái sai",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"COMPLETED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "SM-T02 · Trạng thái không tồn tại (BOGUS) → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{pendingOrderId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{pendingOrderId}}",
+                "status"
+              ]
+            },
+            "description": "**SM-T02** – Trạng thái không tồn tại (BOGUS) → 400\n\n- **Yêu cầu:** Task 10.1 (tiêu chí a)\n- **Kỹ thuật:** Phân vùng tương đương (vùng không hợp lệ)\n- **Kết quả mong đợi:** 400",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"BOGUS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "SM-T03 · PAID → PREPARING",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status = PREPARING', () => pm.expect(pm.response.json().status).to.eql('PREPARING'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "status"
+              ]
+            },
+            "description": "**SM-T03** – PAID → PREPARING\n\n- **Yêu cầu:** Task 10.1 (tiêu chí a)\n- **Kỹ thuật:** Kiểm thử chuyển trạng thái\n- **Kết quả mong đợi:** 200, status PREPARING",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PREPARING\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "SM-T04 · PREPARING → CANCELLED (không cho huỷ khi đang pha) → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "status"
+              ]
+            },
+            "description": "**SM-T04** – PREPARING → CANCELLED (không cho huỷ khi đang pha) → 400\n\n- **Yêu cầu:** Task 10.1 (tiêu chí a)\n- **Kỹ thuật:** Kiểm thử chuyển trạng thái\n- **Kết quả mong đợi:** 400",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CANCELLED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "SM-T05 · PREPARING → READY",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status = READY', () => pm.expect(pm.response.json().status).to.eql('READY'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "status"
+              ]
+            },
+            "description": "**SM-T05** – PREPARING → READY\n\n- **Yêu cầu:** Task 10.1 (tiêu chí a)\n- **Kỹ thuật:** Kiểm thử chuyển trạng thái\n- **Kết quả mong đợi:** 200, status READY",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"READY\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "SM-T06 · READY → COMPLETED",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status = COMPLETED', () => pm.expect(pm.response.json().status).to.eql('COMPLETED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "status"
+              ]
+            },
+            "description": "**SM-T06** – READY → COMPLETED\n\n- **Yêu cầu:** Task 10.1 (tiêu chí a)\n- **Kỹ thuật:** Kiểm thử chuyển trạng thái\n- **Kết quả mong đợi:** 200, status COMPLETED",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"COMPLETED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "SM-T07 · COMPLETED → CANCELLED (trạng thái kết thúc) → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "status"
+              ]
+            },
+            "description": "**SM-T07** – COMPLETED → CANCELLED (trạng thái kết thúc) → 400\n\n- **Yêu cầu:** Task 10.1 (tiêu chí a)\n- **Kỹ thuật:** Kiểm thử chuyển trạng thái\n- **Kết quả mong đợi:** 400",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CANCELLED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "SM-T08 · Khách tự chuyển đơn PENDING → PAID (bỏ qua thanh toán) → 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{pendingOrderId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{pendingOrderId}}",
+                "status"
+              ]
+            },
+            "description": "**SM-T08** – Khách tự chuyển đơn PENDING → PAID (bỏ qua thanh toán) → 403\n\n- **Yêu cầu:** Task 10.1 (tiêu chí a)\n- **Kỹ thuật:** Phân quyền + chuyển trạng thái\n- **Kết quả mong đợi:** 403",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PAID\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "SM-T09 · Khách tự chuyển đơn sang PREPARING → 403 (chỉ nhân viên)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{pendingOrderId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{pendingOrderId}}",
+                "status"
+              ]
+            },
+            "description": "**SM-T09** – Khách tự chuyển đơn sang PREPARING → 403 (chỉ nhân viên)\n\n- **Yêu cầu:** Task 10.1 (tiêu chí a)\n- **Kỹ thuật:** Phân quyền\n- **Kết quả mong đợi:** 403",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PREPARING\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "SM-T10 · User B huỷ đơn của A → bị chặn",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userTokenB}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{cancelOrderId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{cancelOrderId}}",
+                "status"
+              ]
+            },
+            "description": "**SM-T10** – User B huỷ đơn của A → bị chặn\n\n- **Yêu cầu:** Task 10.1 (tiêu chí a)\n- **Kỹ thuật:** Phân quyền\n- **Kết quả mong đợi:** 403",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CANCELLED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "SM-T11 · Khách huỷ đơn PENDING → CANCELLED, hoàn lại tồn kho",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.sendRequest({ url: pm.variables.get('baseUrl').replace(/\\/$/, '') + '/orders/' + pm.collectionVariables.get('cancelOrderId'), header: { Authorization: 'Bearer ' + pm.collectionVariables.get('userToken') } }, (e, o) => {",
+                  "  const it = o.json().items[0];",
+                  "  pm.collectionVariables.set('cancelProductId', it.productId);",
+                  "  pm.collectionVariables.set('cancelQty', it.qty);",
+                  "  pm.sendRequest(pm.variables.get('baseUrl').replace(/\\/$/, '') + '/products/' + it.productId, (e2, p) => pm.collectionVariables.set('stockBefore', p.json().stock));",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status CANCELLED', () => pm.expect(pm.response.json().status).to.eql('CANCELLED'));",
+                  "pm.sendRequest(pm.variables.get('baseUrl').replace(/\\/$/, '') + '/products/' + pm.collectionVariables.get('cancelProductId'), (e, p) => {",
+                  "  pm.test('Tồn kho được hoàn lại', () => pm.expect(p.json().stock).to.eql(Number(pm.collectionVariables.get('stockBefore')) + Number(pm.collectionVariables.get('cancelQty'))));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{cancelOrderId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{cancelOrderId}}",
+                "status"
+              ]
+            },
+            "description": "**SM-T11** – Khách huỷ đơn PENDING → CANCELLED, hoàn lại tồn kho\n\n- **Yêu cầu:** Task 10.1, Task 10.3\n- **Kỹ thuật:** Chuyển trạng thái + kiểm tra tồn kho\n- **Kết quả mong đợi:** 200, status CANCELLED, tồn kho sản phẩm được cộng lại",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CANCELLED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "SM-T12 · Huỷ lại đơn đã CANCELLED → bị chặn",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{cancelOrderId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{cancelOrderId}}",
+                "status"
+              ]
+            },
+            "description": "**SM-T12** – Huỷ lại đơn đã CANCELLED → bị chặn\n\n- **Yêu cầu:** Task 10.1 (tiêu chí a)\n- **Kỹ thuật:** Trạng thái kết thúc\n- **Kết quả mong đợi:** 400",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CANCELLED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "8. Tồn kho khi đặt đồng thời (Task 10.3)",
+      "description": "Tạo sản phẩm tồn kho 3, gửi 5 đơn cùng lúc: không được bán vượt 3. Sản phẩm test \"QA Concurrency\" được giữ lại với tồn kho 0.",
+      "item": [
+        {
+          "name": "INV-T01 · ADMIN tạo sản phẩm test tồn kho = 3",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('qaProductId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "**INV-T01** – ADMIN tạo sản phẩm test tồn kho = 3\n\n- **Yêu cầu:** Task 10.3\n- **Kỹ thuật:** Chuẩn bị dữ liệu\n- **Kết quả mong đợi:** 201",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"QA Concurrency\",\n  \"category\": \"QA Test\",\n  \"basePrice\": 20000,\n  \"image\": \"https://example.com/qa.jpg\",\n  \"stock\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "INV-T02 · Khách thường tạo sản phẩm → 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "**INV-T02** – Khách thường tạo sản phẩm → 403\n\n- **Yêu cầu:** Phân quyền ADMIN\n- **Kỹ thuật:** Phân quyền\n- **Kết quả mong đợi:** 403",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"X\",\n  \"category\": \"X\",\n  \"basePrice\": 1000,\n  \"image\": \"https://example.com/x.jpg\",\n  \"stock\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "INV-T03 · Gửi 5 đơn cùng lúc → không bán vượt tồn kho",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Tồn kho ban đầu = 3', () => pm.expect(pm.response.json().stock).to.eql(3));",
+                  "const productId = pm.collectionVariables.get('qaProductId');",
+                  "const codes = [];",
+                  "for (let i = 0; i < 5; i++) {",
+                  "  pm.sendRequest({",
+                  "    url: pm.variables.get('baseUrl').replace(/\\/$/, '') + '/orders',",
+                  "    method: 'POST',",
+                  "    header: [",
+                  "      { key: 'Content-Type', value: 'application/json' },",
+                  "      { key: 'Authorization', value: 'Bearer ' + pm.collectionVariables.get('userToken') },",
+                  "    ],",
+                  "    body: { mode: 'raw', raw: JSON.stringify({ items: [{ productId, size: 'S', toppings: [], qty: 1 }] }) },",
+                  "  }, (err, res) => {",
+                  "    codes.push(err ? 0 : res.code);",
+                  "    if (codes.length < 5) return;",
+                  "    const ok = codes.filter((c) => c === 201).length;",
+                  "    console.log('Kết quả 5 đơn đồng thời:', codes.join(', '));",
+                  "    pm.test('Số đơn thành công ≤ 3 (không bán vượt)', () => pm.expect(ok).to.be.within(1, 3));",
+                  "    pm.test('Đơn bị từ chối trả lỗi 4xx', () => codes.filter((c) => c !== 201).forEach((c) => pm.expect(c).to.be.within(400, 499)));",
+                  "    pm.sendRequest(pm.variables.get('baseUrl').replace(/\\/$/, '') + '/products/' + productId, (e, p) => {",
+                  "      pm.test('Tồn kho cuối = 3 − số đơn thành công', () => pm.expect(p.json().stock).to.eql(3 - ok));",
+                  "    });",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/{{qaProductId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products",
+                "{{qaProductId}}"
+              ]
+            },
+            "description": "**INV-T03** – Gửi 5 đơn cùng lúc → không bán vượt tồn kho\n\n- **Yêu cầu:** Task 10.3 (tiêu chí c)\n- **Kỹ thuật:** Kiểm thử đồng thời (5 request song song bằng pm.sendRequest)\n- **Kết quả mong đợi:** Số đơn thành công ≤ 3; đơn bị từ chối trả 4xx (không phải 500); tồn kho cuối = 3 − số đơn thành công, không âm"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const limit = Number(pm.variables.get('maxResponseMs') || 500);",
+          "pm.test('NFR: phản hồi < ' + limit + 'ms', () => pm.expect(pm.response.responseTime).to.be.below(limit));"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:4000",
+      "type": "string"
+    },
+    {
+      "key": "adminEmail",
+      "value": "admin@phuclong.vn",
+      "type": "string"
+    },
+    {
+      "key": "adminPassword",
+      "value": "Admin@123456",
+      "type": "string"
+    },
+    {
+      "key": "maxResponseMs",
+      "value": "500",
+      "type": "string"
+    }
+  ]
+}

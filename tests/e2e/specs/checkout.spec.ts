@@ -2,12 +2,12 @@ import { expect, test } from '@playwright/test';
 
 /**
  * E2E-T01 (Task 5.2): luồng chính từ menu đến xác nhận đơn, đúng như người dùng thao tác.
- * Thanh toán bằng MoMo (mô phỏng, hoàn tất ngay) để không phụ thuộc SePay thật.
+ * Thanh toán bằng thẻ (mô phỏng, hoàn tất ngay) để không phụ thuộc SePay thật.
  */
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:4000';
 const PASSWORD = 'Password123!';
 
-test('E2E-T01 menu → giỏ hàng → đăng nhập → thanh toán MoMo → xác nhận đơn', async ({ page, request }) => {
+test('E2E-T01 menu → giỏ hàng → đăng nhập → thanh toán thẻ → xác nhận đơn', async ({ page, request }) => {
   // Tài khoản mới cho mỗi lần chạy (tạo qua API cho nhanh)
   const email = `e2e.${Date.now()}@e2e.phuclong.vn`;
   const register = await request.post(`${API_URL}/auth/register`, { data: { email, password: PASSWORD } });
@@ -24,10 +24,10 @@ test('E2E-T01 menu → giỏ hàng → đăng nhập → thanh toán MoMo → x�
   const cartLink = page.getByRole('link', { name: /^Giỏ hàng, 1 món/ });
   await expect(cartLink).toBeVisible();
 
-  // 3. Sang trang thanh toán, chọn MoMo; chưa đăng nhập → bị chuyển tới /login
+  // 3. Sang trang thanh toán, chọn thẻ; chưa đăng nhập → bị chuyển tới /login
   await cartLink.click();
   await expect(page).toHaveURL(/\/checkout/);
-  await page.getByText('MoMo / ZaloPay').click();
+  await page.getByRole('radio', { name: 'Thẻ ngân hàng' }).check();
   await page.getByRole('button', { name: /Xác nhận trả/ }).click();
   await expect(page).toHaveURL(/\/login\?next=/);
 
@@ -38,8 +38,8 @@ test('E2E-T01 menu → giỏ hàng → đăng nhập → thanh toán MoMo → x�
   await expect(page).toHaveURL(/\/checkout/);
   await expect(page.getByRole('link', { name: /^Giỏ hàng, 1 món/ })).toBeVisible();
 
-  // 5. Thanh toán MoMo → trang đặt hàng thành công
-  await page.getByText('MoMo / ZaloPay').click();
+  // 5. Thanh toán thẻ → trang đặt hàng thành công
+  await page.getByRole('radio', { name: 'Thẻ ngân hàng' }).check();
   await page.getByRole('button', { name: /Xác nhận trả/ }).click();
   await expect(page).toHaveURL(/\/order-success\?orderId=\d+/);
   await expect(page.getByRole('heading', { name: 'Đặt Hàng Thành Công!' })).toBeVisible();

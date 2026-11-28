@@ -4,27 +4,28 @@ import type { PrismaService } from '../prisma/prisma.service';
 
 describe('PromotionsService (nhánh in-memory — bảng fallback WELCOME10)', () => {
   const service = new PromotionsService(null);
+  const userId = 'customer';
 
   it('WELCOME10 giảm 10% tối đa 20.000đ cho đơn từ 50.000đ', async () => {
-    const result = await service.validate('welcome10', 130000);
+    const result = await service.validate('welcome10', 130000, userId);
     expect(result).toEqual({ code: 'WELCOME10', discountAmount: 13000, total: 117000 });
   });
 
   it('giảm giá bị chặn bởi maxDiscountAmount', async () => {
     // 10% của 500.000 = 50.000đ nhưng max là 20.000đ
-    const result = await service.validate('WELCOME10', 500000);
+    const result = await service.validate('WELCOME10', 500000, userId);
     expect(result.discountAmount).toBe(20000);
     expect(result.total).toBe(480000);
   });
 
   it('đơn dưới mức tối thiểu → 400 kèm ngưỡng', async () => {
-    await expect(service.validate('WELCOME10', 40000)).rejects.toThrow(
+    await expect(service.validate('WELCOME10', 40000, userId)).rejects.toThrow(
       new BadRequestException('Mã "WELCOME10" áp dụng cho đơn từ 50.000đ'),
     );
   });
 
   it('mã không tồn tại → 400', async () => {
-    await expect(service.validate('GIA-MA', 130000)).rejects.toThrow(BadRequestException);
+    await expect(service.validate('GIA-MA', 130000, userId)).rejects.toThrow(BadRequestException);
   });
 
   it('fallbackvoucher có đúng 1 mã seed', () => {
@@ -33,9 +34,11 @@ describe('PromotionsService (nhánh in-memory — bảng fallback WELCOME10)', (
 });
 
 describe('PromotionsService (nhánh Prisma — mock)', () => {
+  const userId = 'customer';
   function serviceWith(promotion: unknown): PromotionsService {
     const prisma = {
       promotion: { findUnique: jest.fn().mockResolvedValue(promotion) },
+      order: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     return new PromotionsService(prisma as unknown as PrismaService);
   }
@@ -53,7 +56,7 @@ describe('PromotionsService (nhánh Prisma — mock)', () => {
       startsAt: new Date(0),
       endsAt: null,
     });
-    const result = await svc.validate('giam5k', 20000);
+    const result = await svc.validate('giam5k', 20000, userId);
     expect(result).toEqual({ code: 'GIAM5K', discountAmount: 5000, total: 15000 });
   });
 
@@ -70,7 +73,7 @@ describe('PromotionsService (nhánh Prisma — mock)', () => {
       startsAt: new Date(0),
       endsAt: new Date(Date.now() - 1000),
     });
-    await expect(svc.validate('HETHAN', 100000)).rejects.toThrow(BadRequestException);
+    await expect(svc.validate('HETHAN', 100000, userId)).rejects.toThrow(BadRequestException);
   });
 
   it('voucher hết lượt sử dụng → 400', async () => {
@@ -86,7 +89,7 @@ describe('PromotionsService (nhánh Prisma — mock)', () => {
       startsAt: new Date(0),
       endsAt: null,
     });
-    await expect(svc.validate('HETLUOT', 100000)).rejects.toThrow(BadRequestException);
+    await expect(svc.validate('HETLUOT', 100000, userId)).rejects.toThrow(BadRequestException);
   });
 
   it('voucher bị vô hiệu hóa → 400', async () => {
@@ -102,6 +105,6 @@ describe('PromotionsService (nhánh Prisma — mock)', () => {
       startsAt: new Date(0),
       endsAt: null,
     });
-    await expect(svc.validate('TAT', 100000)).rejects.toThrow(BadRequestException);
+    await expect(svc.validate('TAT', 100000, userId)).rejects.toThrow(BadRequestException);
   });
 });

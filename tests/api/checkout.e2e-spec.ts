@@ -338,12 +338,46 @@ describe('API tạo đơn và thanh toán (integration, PostgreSQL thật)', () 
         usageLimit: 1,
       },
     });
-    const checkout = (productId: string) => request(http).post('/orders').set(bearer(tokenA))
+    const checkout = (token: string, productId: string) => request(http).post('/orders').set(bearer(token))
       .send({ items: [{ productId, size: 'S', qty: 1 }], voucherCode: code });
-    const results = await Promise.all([checkout('1'), checkout('2')]);
+    const results = await Promise.all([checkout(tokenA, '1'), checkout(tokenB, '2')]);
     expect(results.map(({ status }) => status).sort()).toEqual([201, 400]);
     expect(await db.promotion.findUnique({ where: { code } })).toMatchObject({ usedCount: 1 });
     expect(await db.order.count({ where: { voucherCode: code } })).toBe(1);
+  });
+
+  it('mỗi tài khoản chỉ dùng một lần cho mỗi mã, kể cả khi gửi hai đơn đồng thời', async () => {
+    const db = app.get(PrismaService);
+    const { code } = await db.promotion.create({
+      data: {
+        code: `INT-ONCE-${Date.now()}`,
+        name: 'Voucher dùng một lần',
+        discountType: 'FIXED',
+        discountValue: 1000,
+        usageLimit: 20,
+      },
+    });
+    const preview = (token: string) => request(http).post('/promotions/validate').set(bearer(token))
+      .send({ code: code.toLowerCase(), subtotal: 50000 });
+    const checkout = (token: string, productId: string) => request(http).post('/orders').set(bearer(token))
+      .send({ items: [{ productId, size: 'S', qty: 1 }], voucherCode: code });
+
+    await preview(tokenA).expect(201);
+    await preview(tokenA).expect(201);
+    const attempts = await Promise.all([checkout(tokenA, '1'), checkout(tokenA, '2')]);
+    expect(attempts.map(({ status }) => status).sort()).toEqual([201, 400]);
+    const duplicateMessage = `Bạn đã sử dụng mã "${code}"`;
+    expect(attempts.find(({ status }) => status === 400)?.body.message).toBe(duplicateMessage);
+    expect((await preview(tokenA).expect(400)).body.message).toBe(duplicateMessage);
+
+    const orderId = attempts.find(({ status }) => status === 201)!.body.id as number;
+    await request(http).patch(`/orders/${orderId}/status`).set(bearer(tokenA))
+      .send({ status: 'CANCELLED' }).expect(200);
+    await checkout(tokenA, '1').expect(400);
+    await preview(tokenB).expect(201);
+    await checkout(tokenB, '1').expect(201);
+    expect(await db.promotion.findUnique({ where: { code } })).toMatchObject({ usedCount: 2 });
+    expect(await db.order.count({ where: { voucherCode: code } })).toBe(2);
   });
 
   it('INT-T14 endpoint thanh toán từ chối dữ liệu sai kiểu', async () => {

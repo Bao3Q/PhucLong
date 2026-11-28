@@ -21,7 +21,7 @@ import {
   assertTransition,
 } from './entities/order.entity';
 import { ProductsService } from '../products/products.service';
-import { PromotionsService } from '../promotions/promotions.service';
+import { PromotionsService, VoucherAlreadyUsedException } from '../promotions/promotions.service';
 import { SIZE_SURCHARGE, TOPPINGS } from '../products/products.data';
 
 /** Topping hợp lệ — trùng bảng giá trong products.data.ts. */
@@ -138,7 +138,7 @@ export class OrdersService {
   }
 
   private async priceWithVoucher(
-    { voucherCode, subtotal }: NewOrder,
+    { userId, voucherCode, subtotal }: NewOrder,
     tx?: Prisma.TransactionClient,
   ) {
     if (!voucherCode) {
@@ -146,9 +146,12 @@ export class OrdersService {
     }
 
     const promotions = this.promotionsService ?? new PromotionsService(this.prisma);
-    const applied = tx
-      ? await promotions.validatePromotion(voucherCode, subtotal, tx)
-      : await promotions.validatePromotion(voucherCode, subtotal);
+    if (tx) {
+      // Xếp hàng theo cặp tài khoản/mã để lần kiểm tra sau thấy đơn vừa commit.
+      const lockKey = JSON.stringify(['voucher', userId, voucherCode]);
+      await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+    }
+    const applied = await promotions.validatePromotion(voucherCode, subtotal, userId, tx);
     return {
       discountAmount: applied.discountAmount,
       appliedVoucher: applied.code,
@@ -291,7 +294,7 @@ export class OrdersService {
         }
       }
       return created.id;
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     const saved = await this.ordersRepository.findById(createdOrderId);
     if (!saved) {
       throw new NotFoundException('Không tìm thấy đơn hàng vừa tạo');
@@ -337,6 +340,9 @@ export class OrdersService {
     const { discountAmount, appliedVoucher, total } =
       await this.priceWithVoucher(draft);
     const createAndSaveOrder = async (): Promise<Order> => {
+      if (appliedVoucher && this.ordersRepository.hasVoucherInMemory(draft.userId, appliedVoucher)) {
+        throw new VoucherAlreadyUsedException(appliedVoucher);
+      }
       const orderId = this.ordersRepository.nextId();
       const now = new Date();
       return this.ordersRepository.save({

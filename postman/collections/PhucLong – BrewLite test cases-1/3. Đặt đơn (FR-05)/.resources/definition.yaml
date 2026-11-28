@@ -1,3 +1,0 @@
-$kind: collection
-description: "POST /orders: cần JWT, validate giỏ hàng, server tự tính giá, lưu PENDING."
-order: 4000

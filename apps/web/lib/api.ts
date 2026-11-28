@@ -131,6 +131,11 @@ export interface VoucherValidation {
   total: number;
 }
 
+export interface AvailableVoucher {
+  code: string;
+  name: string;
+}
+
 // ==================== ApiResult + request ====================
 
 export type ApiErrorKind =
@@ -317,6 +322,10 @@ export function simulateSePay(orderId: number | string): Promise<ApiResult<{ suc
 /** GET /payments/loyalty — điểm thưởng của user đang đăng nhập. */
 export function fetchLoyaltyPoints(): Promise<ApiResult<LoyaltyPoints>> {
   return request<LoyaltyPoints>('/payments/loyalty');
+}
+
+export function fetchAvailableVouchers(): Promise<ApiResult<AvailableVoucher[]>> {
+  return request<AvailableVoucher[]>('/promotions/available', { auth: false });
 }
 
 /** POST /promotions/validate — xem trước giảm giá (không tiêu lượt dùng). Cần đăng nhập. */

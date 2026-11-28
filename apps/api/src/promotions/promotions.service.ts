@@ -4,6 +4,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
 
+export class VoucherAlreadyUsedException extends BadRequestException {
+  constructor(code: string) {
+    super(`Bạn đã sử dụng mã "${code}"`);
+  }
+}
+
 /** Row Promotion rút gọn cho việc tính giảm giá. */
 export interface PromotionView {
   code: string;
@@ -57,6 +63,7 @@ export class PromotionsService {
   async validatePromotion(
     code: string,
     subtotal: number,
+    userId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<PromotionResult> {
     const normalized = code.trim().toUpperCase();
@@ -74,6 +81,12 @@ export class PromotionsService {
 
     if (!promo) {
       throw new BadRequestException(`Mã giảm giá "${normalized}" không tồn tại`);
+    }
+    if (client && await client.order.findFirst({
+      where: { userId, voucherCode: normalized },
+      select: { id: true },
+    })) {
+      throw new VoucherAlreadyUsedException(normalized);
     }
     if (!promo.isActive) {
       throw new BadRequestException(`Mã giảm giá "${normalized}" không còn hiệu lực`);
@@ -107,8 +120,8 @@ export class PromotionsService {
   }
 
   /** Endpoint POST /promotions/validate — chỉ xem trước, không tiêu lượt dùng. */
-  async validate(code: string, subtotal: number): Promise<PromotionResult> {
-    return this.validatePromotion(code, subtotal);
+  async validate(code: string, subtotal: number, userId: string): Promise<PromotionResult> {
+    return this.validatePromotion(code, subtotal, userId);
   }
 
   // Lấy danh sách voucher còn hiệu lực

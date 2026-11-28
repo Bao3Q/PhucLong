@@ -1,4 +1,0 @@
-$kind: collection
-name: 2. Đăng ký / Đăng nhập JWT (FR-04)
-description: "POST /auth/register, POST /auth/login. Tạo 2 tài khoản mới mỗi lần chạy: A (chính) và B (để test phân quyền)."
-order: 3000

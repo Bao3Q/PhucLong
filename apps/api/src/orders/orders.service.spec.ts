@@ -56,6 +56,16 @@ describe('OrdersService (nhánh in-memory, không cần DB)', () => {
     expect((await products.findOneFromStorage('1'))?.stock).toBe(50);
   });
 
+  it('chặn lần dùng voucher thứ hai của cùng tài khoản và hoàn lại tồn kho', async () => {
+    const dto = { items: [item], voucherCode: 'welcome10' };
+    await service.createOrder(user, dto);
+
+    await expect(service.createOrder(user, dto)).rejects.toThrow(
+      'Bạn đã sử dụng mã "WELCOME10"',
+    );
+    expect((await products.findOneFromStorage('1'))?.stock).toBe(48);
+  });
+
   it('topping lạ hoặc trùng → 400, không trừ stock', async () => {
     await expect(
       service.createOrder(user, {
