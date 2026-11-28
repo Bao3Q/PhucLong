@@ -61,7 +61,7 @@ describe('OrdersService (nhánh in-memory, không cần DB)', () => {
     await service.createOrder(user, dto);
 
     await expect(service.createOrder(user, dto)).rejects.toThrow(
-      'Bạn đã sử dụng mã "WELCOME10"',
+      'Bạn đã sử dụng mã "WELCOME10".',
     );
     expect((await products.findOneFromStorage('1'))?.stock).toBe(48);
   });

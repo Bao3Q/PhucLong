@@ -6,7 +6,7 @@ import { UpdatePromotionDto } from './dto/update-promotion.dto';
 
 export class VoucherAlreadyUsedException extends BadRequestException {
   constructor(code: string) {
-    super(`Bạn đã sử dụng mã "${code}"`);
+    super(`Bạn đã sử dụng mã "${code}".`);
   }
 }
 
@@ -55,6 +55,15 @@ export class PromotionsService {
     @Optional() @Inject(PrismaService) private readonly prisma?: PrismaService | null,
   ) {}
 
+  async listUsedVoucherCodes(userId: string): Promise<string[]> {
+    const orders = await this.prisma?.order.findMany({
+      where: { userId, voucherCode: { not: null } },
+      distinct: ['voucherCode'],
+      select: { voucherCode: true },
+    });
+    return orders?.flatMap(({ voucherCode }) => voucherCode ? [voucherCode] : []) ?? [];
+  }
+
   /**
    * Kiểm tra voucher và tính giảm giá. Hết hạn/hết lượt/đơn quá nhỏ → BadRequest
    * với lý do tiếng Việt để UI hiện thẳng cho khách. Với tx (dùng trong
@@ -82,7 +91,7 @@ export class PromotionsService {
     if (!promo) {
       throw new BadRequestException(`Mã giảm giá "${normalized}" không tồn tại`);
     }
-    if (client && await client.order.findFirst({
+    if (await client?.order.findFirst({
       where: { userId, voucherCode: normalized },
       select: { id: true },
     })) {

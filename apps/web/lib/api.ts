@@ -328,6 +328,10 @@ export function fetchAvailableVouchers(): Promise<ApiResult<AvailableVoucher[]>>
   return request<AvailableVoucher[]>('/promotions/available', { auth: false });
 }
 
+export function fetchVoucherRedemption(): Promise<ApiResult<{ usedCodes: string[] }>> {
+  return request<{ usedCodes: string[] }>('/promotions/redemption');
+}
+
 /** POST /promotions/validate — xem trước giảm giá (không tiêu lượt dùng). Cần đăng nhập. */
 export function validateVoucher(
   code: string,

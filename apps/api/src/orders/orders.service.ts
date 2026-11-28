@@ -147,7 +147,7 @@ export class OrdersService {
 
     const promotions = this.promotionsService ?? new PromotionsService(this.prisma);
     if (tx) {
-      // Xếp hàng theo cặp tài khoản/mã để lần kiểm tra sau thấy đơn vừa commit.
+      // Xếp hàng theo tài khoản và mã để chặn hai đơn sử dụng cùng mã.
       const lockKey = JSON.stringify(['voucher', userId, voucherCode]);
       await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
     }

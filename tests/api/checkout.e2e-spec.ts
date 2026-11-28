@@ -346,38 +346,57 @@ describe('API tạo đơn và thanh toán (integration, PostgreSQL thật)', () 
     expect(await db.order.count({ where: { voucherCode: code } })).toBe(1);
   });
 
-  it('mỗi tài khoản chỉ dùng một lần cho mỗi mã, kể cả khi gửi hai đơn đồng thời', async () => {
+  it('mỗi tài khoản dùng mỗi mã một lần và vẫn dùng được mã khác', async () => {
     const db = app.get(PrismaService);
-    const { code } = await db.promotion.create({
-      data: {
-        code: `INT-ONCE-${Date.now()}`,
+    const firstAccount = await registerAndLogin(app, 'voucher-a');
+    const otherAccount = await registerAndLogin(app, 'voucher-b');
+    const redemption = (token: string) => request(http).get('/promotions/redemption').set(bearer(token));
+    await request(http).get('/promotions/redemption').expect(401);
+    expect((await redemption(firstAccount).expect(200)).body).toEqual({ usedCodes: [] });
+    const stamp = Date.now();
+    const codes = [`INT-ONCE-A-${stamp}`, `INT-ONCE-B-${stamp}`];
+    await db.promotion.createMany({
+      data: codes.map((code) => ({
+        code,
         name: 'Voucher dùng một lần',
         discountType: 'FIXED',
         discountValue: 1000,
         usageLimit: 20,
-      },
+      })),
     });
-    const preview = (token: string) => request(http).post('/promotions/validate').set(bearer(token))
+    const preview = (token: string, code: string) => request(http).post('/promotions/validate').set(bearer(token))
       .send({ code: code.toLowerCase(), subtotal: 50000 });
-    const checkout = (token: string, productId: string) => request(http).post('/orders').set(bearer(token))
+    const checkout = (token: string, productId: string, code: string) => request(http).post('/orders').set(bearer(token))
       .send({ items: [{ productId, size: 'S', qty: 1 }], voucherCode: code });
 
-    await preview(tokenA).expect(201);
-    await preview(tokenA).expect(201);
-    const attempts = await Promise.all([checkout(tokenA, '1'), checkout(tokenA, '2')]);
+    await preview(firstAccount, codes[0]).expect(201);
+    await preview(firstAccount, codes[1]).expect(201);
+    const attempts = await Promise.all([
+      checkout(firstAccount, '1', codes[0]),
+      checkout(firstAccount, '2', codes[0].toLowerCase()),
+    ]);
     expect(attempts.map(({ status }) => status).sort()).toEqual([201, 400]);
-    const duplicateMessage = `Bạn đã sử dụng mã "${code}"`;
+    const duplicateMessage = `Bạn đã sử dụng mã "${codes[0]}".`;
     expect(attempts.find(({ status }) => status === 400)?.body.message).toBe(duplicateMessage);
-    expect((await preview(tokenA).expect(400)).body.message).toBe(duplicateMessage);
+    expect((await preview(firstAccount, codes[0]).expect(400)).body.message).toBe(duplicateMessage);
+    expect((await redemption(firstAccount).expect(200)).body).toEqual({ usedCodes: [codes[0]] });
+    expect((await redemption(otherAccount).expect(200)).body).toEqual({ usedCodes: [] });
 
     const orderId = attempts.find(({ status }) => status === 201)!.body.id as number;
-    await request(http).patch(`/orders/${orderId}/status`).set(bearer(tokenA))
+    await request(http).patch(`/orders/${orderId}/status`).set(bearer(firstAccount))
       .send({ status: 'CANCELLED' }).expect(200);
-    await checkout(tokenA, '1').expect(400);
-    await preview(tokenB).expect(201);
-    await checkout(tokenB, '1').expect(201);
-    expect(await db.promotion.findUnique({ where: { code } })).toMatchObject({ usedCount: 2 });
-    expect(await db.order.count({ where: { voucherCode: code } })).toBe(2);
+    await checkout(firstAccount, '1', codes[0]).expect(400);
+    await createOrder(firstAccount);
+    await preview(firstAccount, codes[1]).expect(201);
+    await checkout(firstAccount, '2', codes[1]).expect(201);
+    await preview(firstAccount, codes[1]).expect(400);
+    expect((await redemption(firstAccount).expect(200)).body.usedCodes.sort()).toEqual(codes);
+    await preview(otherAccount, codes[0]).expect(201);
+    await checkout(otherAccount, '1', codes[0]).expect(201);
+    await preview(otherAccount, codes[0]).expect(400);
+    const promos = await db.promotion.findMany({ where: { code: { in: codes } } });
+    expect(promos.map(({ usedCount }) => usedCount).sort()).toEqual([1, 2]);
+    expect(await db.order.count({ where: { voucherCode: { in: codes } } })).toBe(3);
   });
 
   it('INT-T14 endpoint thanh toán từ chối dữ liệu sai kiểu', async () => {

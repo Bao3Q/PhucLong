@@ -19,6 +19,7 @@ import {
 import { cartTotal, toOrderItems, useCart } from '@/lib/cart';
 import { formatVnd } from '@/lib/orders';
 import { getToken } from '@/lib/auth';
+import { useVoucherRedemption } from '@/lib/useVoucherRedemption';
 
 type PaymentMethod = 'card' | 'sepay';
 
@@ -37,6 +38,7 @@ export default function CheckoutPage() {
   const router = useRouter();
   const { cart, setCart } = useCart();
   const isLoggedIn = useIsLoggedIn();
+  const usedVoucherCodes = useVoucherRedemption();
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('sepay');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -44,8 +46,10 @@ export default function CheckoutPage() {
   // Voucher: chọn mã → validate trước (server) → áp vào tổng hiển thị và
   // gửi kèm khi tạo đơn (server tính lại, không tin số tiền client).
   const [voucherOptions, setVoucherOptions] = useState<ApiResult<AvailableVoucher[]> | null>(null);
-  const [selectedVoucherCode, setSelectedVoucherCode] = useState('');
-  const [voucher, setVoucher] = useState<VoucherValidation | null>(null);
+  const [voucherSelection, setSelectedVoucherCode] = useState('');
+  const [validatedVoucher, setVoucher] = useState<VoucherValidation | null>(null);
+  const selectedVoucherCode = usedVoucherCodes.includes(voucherSelection) ? '' : voucherSelection;
+  const voucher = validatedVoucher && !usedVoucherCodes.includes(validatedVoucher.code) ? validatedVoucher : null;
   const [voucherError, setVoucherError] = useState<string | null>(null);
   const [validatingVoucher, setValidatingVoucher] = useState(false);
   const voucherRequest = useRef(0);
@@ -137,7 +141,9 @@ export default function CheckoutPage() {
   }
   const pointsToRedeem = loyaltyError ? 0 : requestedPoints;
   const confirmDisabled = isSubmitting || validatingVoucher || Boolean(loyaltyError);
-  const availableVouchers = voucherOptions?.ok ? voucherOptions.data : [];
+  const voucherList = voucherOptions?.ok ? voucherOptions.data : [];
+  const availableVouchers = voucherList.filter(({ code }) => !usedVoucherCodes.includes(code));
+  const allVouchersUsed = voucherList.length > 0 && availableVouchers.length === 0;
 
   const loyaltyDiscount =
     pointsToRedeem * 1000;
@@ -307,10 +313,10 @@ export default function CheckoutPage() {
                       setVoucher(null);
                       setVoucherError(null);
                     }}
-                    className="min-w-0 flex-1 truncate rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm focus-visible:outline-[#006A32] disabled:bg-gray-50"
+                    className={`min-w-0 flex-1 truncate rounded-xl border px-3 py-2.5 text-sm focus-visible:outline-[#006A32] ${allVouchersUsed ? 'border-stone-300 bg-stone-100 font-semibold text-stone-700' : 'border-gray-200 bg-white disabled:bg-gray-50'}`}
                   >
                     <option value="">
-                      {voucherOptions === null ? 'Đang tải mã giảm giá…' : availableVouchers.length ? 'Không áp dụng mã' : 'Không có mã để chọn'}
+                      {allVouchersUsed ? '' : voucherOptions === null ? 'Đang tải mã giảm giá…' : availableVouchers.length ? 'Không áp dụng mã' : 'Không có mã để chọn'}
                     </option>
                     {availableVouchers.map(({ code, name }) => (
                       <option key={code} value={code}>{code} — {name}</option>
@@ -320,7 +326,7 @@ export default function CheckoutPage() {
                     type="button"
                     onClick={applyVoucher}
                     disabled={validatingVoucher || isSubmitting || !selectedVoucherCode || Boolean(voucher)}
-                    className="shrink-0 px-4 py-2.5 rounded-xl text-sm font-bold border border-[#006A32]/40 text-[#006A32] hover:bg-[#006A32]/5 transition disabled:opacity-50"
+                    className={`shrink-0 rounded-xl border px-4 py-2.5 text-sm font-bold transition ${allVouchersUsed ? 'border-stone-300 bg-stone-100 text-stone-600' : 'border-[#006A32]/40 text-[#006A32] hover:bg-[#006A32]/5 disabled:opacity-50'}`}
                   >
                     {validatingVoucher ? 'Đang kiểm tra…' : 'Áp dụng'}
                   </button>

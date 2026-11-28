@@ -47,6 +47,12 @@ export class PromotionsController {
     return this.promotionsService.listAvailable();
   }
 
+  @Get('redemption')
+  @UseGuards(JwtAuthGuard)
+  async getRedemption(@Req() request: Request & { user: AuthUser }) {
+    return { usedCodes: await this.promotionsService.listUsedVoucherCodes(request.user.id) };
+  }
+
   // Admin xem tất cả voucher
   @Get('admin')
   @UseGuards(JwtAuthGuard, RolesGuard)

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import SiteHeader from '@/components/SiteHeader';
 import { formatVnd } from '@/lib/orders';
+import { useVoucherRedemption } from '@/lib/useVoucherRedemption';
 
 interface Promotion {
   id: number;
@@ -17,6 +18,7 @@ interface Promotion {
 }
 
 export default function VouchersPage() {
+  const usedVoucherCodes = useVoucherRedemption();
   const [vouchers, setVouchers] = useState<Promotion[]>([]);
   const [loading, setLoading] = useState(true);
   const [copyStatus, setCopyStatus] = useState<{ code: string; copied: boolean } | null>(null);
@@ -64,6 +66,7 @@ export default function VouchersPage() {
         ) : (
           <div className="mt-6 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
             {vouchers.map((item) => {
+              const hasUsedVoucher = usedVoucherCodes.includes(item.code);
               const discount = item.discountType === 'PERCENT'
                 ? `${item.discountValue}%`
                 : formatVnd(item.discountValue);
@@ -72,12 +75,12 @@ export default function VouchersPage() {
               const showsDiscount = amounts.some((amount) =>
                 amount.replace(/\s/g, '').toLowerCase().replace('₫', 'đ') === discount,
               );
-              const status = copyStatus?.code === item.code ? copyStatus : null;
+              const status = !hasUsedVoucher && copyStatus?.code === item.code ? copyStatus : null;
 
               return (
-                <article key={item.id} className="flex flex-col overflow-hidden rounded-2xl border border-[#dce7dd] bg-white shadow-sm">
-                  <div className="flex-1 border-t-4 border-[#006a32] p-5 sm:p-6">
-                    <h2 className="text-xl leading-snug font-bold text-[#06482c] [overflow-wrap:anywhere]">
+                <article key={item.id} className={`flex flex-col overflow-hidden rounded-2xl border shadow-sm ${hasUsedVoucher ? 'border-stone-200 bg-stone-50' : 'border-[#dce7dd] bg-white'}`}>
+                  <div className={`flex-1 border-t-4 p-5 sm:p-6 ${hasUsedVoucher ? 'border-stone-400' : 'border-[#006a32]'}`}>
+                    <h2 className={`text-xl leading-snug font-bold [overflow-wrap:anywhere] ${hasUsedVoucher ? 'text-stone-700' : 'text-[#06482c]'}`}>
                       {item.name}
                     </h2>
                     {item.description && (
@@ -86,7 +89,7 @@ export default function VouchersPage() {
                       </p>
                     )}
 
-                    <dl className="mt-5 grid grid-cols-[1fr_auto] gap-x-3 gap-y-2 rounded-xl bg-[#f3f6f1] px-4 py-3 text-sm text-stone-600 [&>dd]:text-right [&>dd]:font-semibold [&>dd]:text-stone-900">
+                    <dl className={`mt-5 grid grid-cols-[1fr_auto] gap-x-3 gap-y-2 rounded-xl px-4 py-3 text-sm text-stone-600 [&>dd]:text-right [&>dd]:font-semibold [&>dd]:text-stone-900 ${hasUsedVoucher ? 'bg-stone-100' : 'bg-[#f3f6f1]'}`}>
                       {!showsDiscount && (
                         <>
                           <dt>Mức giảm</dt>
@@ -106,21 +109,22 @@ export default function VouchersPage() {
                     </dl>
                   </div>
 
-                  <div className="border-t border-dashed border-[#acc4b1] bg-[#f5faf5] px-5 py-4 sm:px-6">
+                  <div className={`border-t border-dashed px-5 py-4 sm:px-6 ${hasUsedVoucher ? 'border-stone-300 bg-stone-100' : 'border-[#acc4b1] bg-[#f5faf5]'}`}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-xs font-semibold text-stone-600">Mã ưu đãi</p>
-                        <strong className="mt-0.5 block font-mono text-base text-[#06482c] [overflow-wrap:anywhere]">
+                        <strong className={`mt-0.5 block font-mono text-base [overflow-wrap:anywhere] ${hasUsedVoucher ? 'text-stone-700' : 'text-[#06482c]'}`}>
                           {item.code}
                         </strong>
                       </div>
                       <button
                         type="button"
                         onClick={() => void copyCode(item.code)}
-                        aria-label={`Sao chép mã ${item.code}`}
-                        className="min-h-11 shrink-0 cursor-pointer rounded-xl bg-[#006a32] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#005227] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#006a32]"
+                        disabled={hasUsedVoucher}
+                        aria-label={hasUsedVoucher ? undefined : `Sao chép mã ${item.code}`}
+                        className={`min-h-11 shrink-0 rounded-xl px-3 text-sm font-semibold transition-colors ${hasUsedVoucher ? 'bg-stone-200 text-stone-700' : 'cursor-pointer bg-[#006a32] text-white hover:bg-[#005227] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#006a32]'}`}
                       >
-                        {status?.copied ? 'Đã sao chép' : 'Sao chép'}
+                        {hasUsedVoucher ? 'Đã sử dụng ưu đãi' : status?.copied ? 'Đã sao chép' : 'Sao chép'}
                       </button>
                     </div>
                     <p role="status" className={status && !status.copied ? 'mt-2 text-xs text-red-800' : 'sr-only'}>
